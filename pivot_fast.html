@@ -72,9 +72,15 @@
   /* Layout */
   .app { display: flex; flex-direction: column; height: 100vh; max-height: 100vh; overflow: hidden; }
   .main { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; }
-  .sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--bg-alt); overflow-y: auto; display: flex; flex-direction: column; transition: width 200ms ease; }
+  .sidebar { width: var(--sb-width, 240px); flex-shrink: 0; border-right: 1px solid var(--border); background: var(--bg-alt); overflow-y: auto; display: flex; flex-direction: column; transition: width 200ms ease; }
   .sidebar.collapsed { width: 0; overflow: hidden; border-right: none; }
+  .sidebar.resizing { transition: none; }
   .content { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  /* Draggable column splitter between panels */
+  .col-resizer { width: 6px; flex-shrink: 0; cursor: col-resize; background: transparent; position: relative; z-index: 6; }
+  .col-resizer::after { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 2px; background: var(--border); transition: background 120ms; }
+  .col-resizer:hover::after, .col-resizer.dragging::after { background: var(--accent); }
+  .sidebar.collapsed + .col-resizer { display: none; }
   /* Sidebar – schema fills the pane */
   .sb-section { padding: 8px 10px; }
   .schema-fill { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px; overflow-y: auto; }
@@ -136,8 +142,8 @@
   .fdialog .footer button:hover { background: var(--bg-alt); }
   /* Pivot UI */
   .pivot-mode { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
-  .pivot-fields { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg-alt); min-height: 0; overflow-y: auto; transition: width 200ms ease; }
-  .sidebar.collapsed ~ .content .pivot-fields { width: 360px; }
+  .pivot-fields { width: var(--pf-width, 320px); flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg-alt); min-height: 0; overflow-y: auto; transition: width 200ms ease; }
+  .pivot-fields.resizing { transition: none; }
   .pivot-fields-h { padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 12px; flex-shrink: 0; }
   .pivot-fields-list { padding: 6px; overflow-y: auto; flex: 0 1 auto; min-height: 60px; max-height: 220px; flex-shrink: 0; }
   .pivot-field { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; cursor: grab; border-radius: 3px; user-select: none; overflow: hidden; }
@@ -305,8 +311,10 @@
   .toggle .track::before { content: ''; position: absolute; height: 12px; width: 12px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform 140ms; }
   .toggle input:checked + .track { background: var(--accent); }
   .toggle input:checked + .track::before { transform: translateX(14px); }
-  .topbar .save-ind { font-size: 11px; color: var(--success); opacity: 0; transition: opacity 200ms; white-space: nowrap; }
-  .topbar .save-ind.show { opacity: 1; }
+  .topbar .save-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 140ms; }
+  .topbar .save-status.on { color: var(--success); border-color: #bfe3c0; background: #f0f8f1; }
+  .topbar .save-status.off { color: var(--warning); border-color: #e8d3a8; background: #fdf6e9; }
+  .topbar .save-status.flash { box-shadow: 0 0 0 2px rgba(46,125,50,0.25); }
   .topbar .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); cursor: pointer; color: var(--text-dim); }
   .topbar .icon-btn:hover { background: var(--bg-alt2); color: var(--text); }
 </style>
@@ -317,23 +325,24 @@
     <span class="title">Parquet Explorer</span>
     <span class="badge" id="duckdb-status">initializing…</span>
     <div class="topbar-sep"></div>
-    <div class="tb-dropzone" id="tb-dropzone" title="Drop .parquet file or click to browse">
+    <div class="tb-dropzone" id="tb-dropzone" title="">
       <span id="tb-drop-label">Drop .parquet or click</span>
     </div>
     <input type="file" id="file-input" accept=".parquet" multiple style="display:none">
     <div class="topbar-sep"></div>
     <div class="tb-tables" id="tb-tables"></div>
     <div class="right">
-      <span class="save-ind" id="save-ind">✓ saved</span>
-      <button class="btn btn-sm" id="sidebar-toggle" title="Toggle schema panel">◀ Schema</button>
-      <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+      <span class="save-status" id="save-status" title="">⟳</span>
+      <button class="btn btn-sm" id="session-btn" title="">💾 Session ⌄</button>
+      <button class="btn btn-sm" id="sidebar-toggle" title="">◀ Schema</button>
+      <button class="icon-btn" id="settings-btn" title="">⚙</button>
       <span class="badge" id="active-table-badge" style="display:none"></span>
     </div>
   </div>
   <div class="main">
     <aside class="sidebar" id="sidebar">
       <div class="sb-section schema-fill" id="schema-section" style="display:none">
-        <div class="sb-h">Schema</div>
+        <div class="sb-h" id="schema-h">Schema</div>
         <div id="schema-list" class="mono" style="font-size: 11px;"></div>
       </div>
     </aside>
@@ -358,7 +367,7 @@ const state = {
   pivot: {}, pivotData: null, pivotShape: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
-  settings: { locale: 'de', rememberFiles: true },
+  settings: { lang: 'de', locale: 'de', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
 };
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
@@ -368,9 +377,119 @@ let _fdlgCloseHandler = null;
 // The Excel LCID prefix (e.g. [$-407]) forces the number/date rendering to that
 // locale regardless of the viewer's regional settings.
 const LOCALES = {
-  de: { label: 'German (1.234,56)', intl: 'de-DE', lcid: '407', dateFmt: 'dd.MM.yyyy', dateTimeFmt: 'dd.MM.yyyy HH:mm:ss' },
+  de: { label: 'Deutsch (1.234,56)', intl: 'de-DE', lcid: '407', dateFmt: 'dd.MM.yyyy', dateTimeFmt: 'dd.MM.yyyy HH:mm:ss' },
   en: { label: 'English US (1,234.56)', intl: 'en-US', lcid: '409', dateFmt: 'yyyy-mm-dd', dateTimeFmt: 'yyyy-mm-dd HH:mm:ss' },
 };
+
+// ============================================================
+// I18N  (German is the default UI language)
+// ============================================================
+const I18N = {
+  de: {
+    langName: 'Deutsch',
+    initializing: 'wird initialisiert…', ready: 'DuckDB bereit', failed: 'DuckDB FEHLER', restoring: 'wird wiederhergestellt…',
+    dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
+    noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
+    table: 'Tabelle', pivot: 'Pivot', sql: 'SQL',
+    splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
+    sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
+    rowsOf: '{0} / {1} Zeilen', first: '« Erste', prev: '‹ Zurück', next: 'Weiter ›', last: 'Letzte »', pageOf: 'Seite {0} / {1}',
+    export: 'Export ⌄', exportResult: 'Ergebnis exportieren ⌄',
+    sortAsc: '▲ Sortieren A→Z', sortDesc: '▼ Sortieren Z→A', clearFilter: '✕ Löschen',
+    tabValues: 'Werte', tabNumber: 'Zahl', tabDate: 'Datum', tabText: 'Text',
+    searchValues: 'Werte suchen…', selectAll: '(Alle auswählen)', selectAllSearch: '(Alle Suchergebnisse auswählen)',
+    matches: '{0} Treffer', unique: '{0} eindeutig', addSelection: '+ Aktuelle Auswahl zum Filter hinzufügen',
+    loadMore: 'Mehr laden ({0} / {1} geladen)', allLoaded: 'Alle geladen',
+    blanksNull: '(Leer / NULL)', noMatches: 'Keine Treffer.', loading: 'Wird geladen…',
+    cancel: 'Abbrechen', ok: 'OK', excludeNot: 'Ausschließen (NICHT)',
+    activeFilterNote: 'Aktiver {0}-Filter: {1}. Nur passende Werte sind unten vorausgewählt.',
+    opGt: '>', opGe: '≥', opLt: '<', opLe: '≤', opEq: '=', opNe: '≠', opBetween: 'zwischen', opTopN: 'Top N',
+    valuePh: 'Wert', upperPh: 'Obergrenze', topNPh: 'N (z. B. 10)',
+    dAfter: 'nach', dOnAfter: 'am oder nach', dBefore: 'vor', dOnBefore: 'am oder vor', dEquals: 'gleich',
+    tContains: 'enthält', tBegins: 'beginnt mit', tEnds: 'endet mit', tEquals: 'gleich', tRegex: 'Regex',
+    pivotFields: 'PivotTable-Felder', searchFields: 'Felder suchen…',
+    tileFilters: 'Filter', tileColumns: 'Spalten', tileRows: 'Zeilen', tileValues: 'Σ Werte',
+    subtotals: 'Zwischensummen:', stTop: 'oben', stBottom: 'unten', stOff: 'aus',
+    expandAll: 'Alle aufklappen', collapseAll: 'Alle zuklappen', clear: 'Leeren',
+    pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
+    rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
+    allFilter: '(Alle)', multipleItems: '(Mehrere Elemente)', custom: '(Benutzerdefiniert)',
+    run: '▶ Ausführen (Strg/Cmd+Enter)', sqlHint: 'Geladene Tabellen sind über ihren Namen abfragbar.', runToSee: 'Führe eine Abfrage aus, um Ergebnisse zu sehen.',
+    rowsN: '{0} Zeilen', moreRows: '…{0} weitere Zeilen werden nicht angezeigt',
+    expSpreadsheet: 'Tabellenkalkulation', expData: 'Daten',
+    numberDateFormat: 'Zahlen-/Datumsformat', language: 'Sprache', rememberToggle: 'Dateien & Einstellungen merken',
+    saveNow: 'Jetzt speichern', clearSaved: 'Gespeicherte Daten löschen', settingsSaved: 'Einstellungen gespeichert',
+    autosaveOn: 'Auto-Speichern', autosaveOff: 'Nicht gespeichert', saved: 'Gespeichert',
+    autosaveOnTip: 'Ansicht & Dateien werden automatisch im Browser gespeichert', autosaveOffTip: 'Speichern ist deaktiviert — Klicken zum Aktivieren',
+    sessionStatus: 'Status', statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
+    confirmClear: 'Alle gespeicherten Ansichten und Dateien löschen? Geladene Tabellen bleiben in dieser Sitzung erhalten.',
+    rememberOn: 'Dateien werden in diesem Browser gespeichert', rememberOff: 'Gespeicherte Dateien gelöscht', clearedData: 'Gespeicherte Daten gelöscht',
+    restored: '{0} Tabelle(n) aus der letzten Sitzung wiederhergestellt',
+    exportedExcel: 'Excel exportiert ({0}-Format)', excelLoading: 'Excel-Bibliothek lädt noch — gleich erneut versuchen', excelFailed: 'Excel-Export fehlgeschlagen: {0}',
+    buildPivotFirst: 'Erst eine Pivot-Tabelle erstellen', runQueryFirst: 'Erst eine Abfrage ausführen',
+    exported: '{0} exportiert', exportFailed: 'Export fehlgeschlagen: {0}', loadFailed: 'Laden von {0} fehlgeschlagen: {1}',
+    filterError: 'Filterfehler: {0}', queryError: 'Abfragefehler: {0}', pivotFailed: 'Pivot-Abfrage fehlgeschlagen: {0}',
+    duckFailed: 'DuckDB-Initialisierung fehlgeschlagen: {0}',
+    valueCount: '{0} Wert(e)', blanksOnly: 'nur Leere', none: 'keine', plusBlanks: ' +Leere', topShort: 'Top {0}',
+    schemaShow: '◀ Schema', schemaHide: '▶ Schema',
+  },
+  en: {
+    langName: 'English',
+    initializing: 'initializing…', ready: 'duckdb ready', failed: 'duckdb FAILED', restoring: 'restoring…',
+    dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
+    noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
+    table: 'Table', pivot: 'Pivot', sql: 'SQL',
+    splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
+    sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
+    rowsOf: '{0} / {1} rows', first: '« First', prev: '‹ Prev', next: 'Next ›', last: 'Last »', pageOf: 'Page {0} / {1}',
+    export: 'Export ⌄', exportResult: 'Export Result ⌄',
+    sortAsc: '▲ Sort A→Z', sortDesc: '▼ Sort Z→A', clearFilter: '✕ Clear',
+    tabValues: 'Values', tabNumber: 'Number', tabDate: 'Date', tabText: 'Text',
+    searchValues: 'Search values…', selectAll: '(Select All)', selectAllSearch: '(Select All Search Results)',
+    matches: '{0} matches', unique: '{0} unique', addSelection: '+ Add Current Selection to Filter',
+    loadMore: 'Load more ({0} / {1} loaded)', allLoaded: 'All loaded',
+    blanksNull: '(Blanks / NULL)', noMatches: 'No matches.', loading: 'Loading…',
+    cancel: 'Cancel', ok: 'OK', excludeNot: 'Exclude (NOT)',
+    activeFilterNote: 'Active {0} filter: {1}. Only matching values are pre-selected below.',
+    opGt: '>', opGe: '≥', opLt: '<', opLe: '≤', opEq: '=', opNe: '≠', opBetween: 'between', opTopN: 'top N',
+    valuePh: 'value', upperPh: 'upper bound', topNPh: 'N (e.g. 10)',
+    dAfter: 'after', dOnAfter: 'on or after', dBefore: 'before', dOnBefore: 'on or before', dEquals: 'equals',
+    tContains: 'contains', tBegins: 'begins with', tEnds: 'ends with', tEquals: 'equals', tRegex: 'regex',
+    pivotFields: 'PivotTable Fields', searchFields: 'Search fields…',
+    tileFilters: 'Filters', tileColumns: 'Columns', tileRows: 'Rows', tileValues: 'Σ Values',
+    subtotals: 'Subtotals:', stTop: 'top', stBottom: 'bottom', stOff: 'off',
+    expandAll: 'Expand All', collapseAll: 'Collapse All', clear: 'Clear',
+    pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
+    rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
+    allFilter: '(All)', multipleItems: '(Multiple Items)', custom: '(Custom)',
+    run: '▶ Run (Ctrl/Cmd+Enter)', sqlHint: 'Loaded tables are queryable by name.', runToSee: 'Run a query to see results.',
+    rowsN: '{0} rows', moreRows: '…{0} more rows omitted from display',
+    expSpreadsheet: 'Spreadsheet', expData: 'Data',
+    numberDateFormat: 'Number / date format', language: 'Language', rememberToggle: 'Remember files & settings',
+    saveNow: 'Save now', clearSaved: 'Clear saved data', settingsSaved: 'Settings saved',
+    autosaveOn: 'Auto-save', autosaveOff: 'Not saved', saved: 'Saved',
+    autosaveOnTip: 'View & files are saved automatically in this browser', autosaveOffTip: 'Saving is off — click to turn on',
+    sessionStatus: 'Status', statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
+    confirmClear: 'Forget all saved view settings and stored files? Loaded tables stay in this session.',
+    rememberOn: 'Files will be remembered in this browser', rememberOff: 'Stored files cleared', clearedData: 'Saved data cleared',
+    restored: 'Restored {0} table(s) from your last session',
+    exportedExcel: 'Exported Excel ({0} formatting)', excelLoading: 'Excel library still loading — try again in a moment', excelFailed: 'Excel export failed: {0}',
+    buildPivotFirst: 'Add fields to build a pivot first', runQueryFirst: 'Run a query first',
+    exported: 'Exported {0}', exportFailed: 'Export failed: {0}', loadFailed: 'Failed to load {0}: {1}',
+    filterError: 'Filter error: {0}', queryError: 'Query error: {0}', pivotFailed: 'Pivot query failed: {0}',
+    duckFailed: 'DuckDB initialization failed: {0}',
+    valueCount: '{0} value(s)', blanksOnly: 'blanks only', none: 'none', plusBlanks: ' +blanks', topShort: 'top {0}',
+    schemaShow: '◀ Schema', schemaHide: '▶ Schema',
+  },
+};
+function tt(key, ...args) {
+  const lang = state.settings.lang || 'de';
+  let s = (I18N[lang] && I18N[lang][key]);
+  if (s === undefined) s = I18N.en[key];
+  if (s === undefined) return key;
+  args.forEach((a, i) => { s = s.replace('{' + i + '}', a); });
+  return s;
+}
 
 const ICONS = {
   funnel: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 9v6l-4 2v-8z"/></svg>',
@@ -502,12 +621,62 @@ function scheduleSave() {
 function savePrefsNow() {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(collectPrefs()));
-    const ind = $('#save-ind'); if (ind) { ind.classList.add('show'); clearTimeout(savePrefsNow._t); savePrefsNow._t = setTimeout(() => ind.classList.remove('show'), 1200); }
+    state._lastSaved = Date.now();
+    const elS = $('#save-status');
+    if (elS) { elS.classList.add('flash'); clearTimeout(savePrefsNow._t); savePrefsNow._t = setTimeout(() => elS.classList.remove('flash'), 700); }
+    updateSaveStatus();
   } catch (e) { console.warn('Failed to save prefs:', e); }
+}
+// Always-visible top-bar indicator so saving isn't hidden away in a menu.
+function updateSaveStatus() {
+  const elS = $('#save-status'); if (!elS) return;
+  if (state.settings.rememberFiles) {
+    elS.className = 'save-status on' + (elS.classList.contains('flash') ? ' flash' : '');
+    const time = state._lastSaved ? new Date(state._lastSaved).toLocaleTimeString(activeLocale().intl, { hour: '2-digit', minute: '2-digit' }) : null;
+    elS.textContent = '✓ ' + tt('autosaveOn') + (time ? ' · ' + time : '');
+    elS.title = tt('autosaveOnTip');
+  } else {
+    elS.className = 'save-status off';
+    elS.textContent = '⚠ ' + tt('autosaveOff');
+    elS.title = tt('autosaveOffTip');
+  }
 }
 function loadPrefs() {
   try { const raw = localStorage.getItem(PREFS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
 }
+// ── Resizable panels ──
+function makeColResizer(targetEl, prop, settingKey, min, max) {
+  const r = el('div', { class: 'col-resizer', title: '' });
+  r.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = targetEl.getBoundingClientRect().width;
+    targetEl.classList.add('resizing'); r.classList.add('dragging');
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+    const onMove = (mv) => { let w = Math.max(min, Math.min(max, startW + (mv.clientX - startX))); targetEl.style.setProperty(prop, w + 'px'); state.settings[settingKey] = Math.round(w); };
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); targetEl.classList.remove('resizing'); r.classList.remove('dragging'); document.body.style.cursor = ''; document.body.style.userSelect = ''; scheduleSave(); };
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+  });
+  return r;
+}
+function applyPanelWidths() {
+  const sb = $('#sidebar'); if (sb) sb.style.setProperty('--sb-width', (state.settings.sidebarWidth || 240) + 'px');
+}
+
+// ── Static (non-rerendered) UI text + status, refreshed on language change ──
+function setDbStatus(key) { state._dbStatusKey = key; const e = $('#duckdb-status'); if (e) e.textContent = tt(key); }
+function applyStaticTexts() {
+  $('#tb-drop-label').textContent = tt('dropParquet');
+  $('#tb-dropzone').title = tt('dropBrowse');
+  $('#session-btn').textContent = '💾 ' + tt('session') + ' ⌄';
+  $('#session-btn').title = tt('session');
+  $('#settings-btn').title = tt('settings');
+  const schemaH = $('#schema-h'); if (schemaH) schemaH.textContent = tt('schema');
+  const sb = $('#sidebar');
+  $('#sidebar-toggle').textContent = sb.classList.contains('collapsed') ? tt('schemaHide') : tt('schemaShow');
+  setDbStatus(state._dbStatusKey || 'initializing');
+  updateSaveStatus();
+}
+
 // Apply a saved per-table view state onto the live state maps (called when a table loads).
 function applyTablePrefs(name, prefs) {
   const tp = prefs?.tables?.[name]; if (!tp) return;
@@ -560,7 +729,7 @@ async function initDuckDB() {
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
   URL.revokeObjectURL(worker_url);
   state.db = db; state.conn = await db.connect();
-  $('#duckdb-status').textContent = 'duckdb ready';
+  setDbStatus('ready');
 }
 
 async function runQuery(sql) {
@@ -597,7 +766,7 @@ async function loadFiles(fileList) {
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
       await registerParquet(buf, file.name);
-    } catch (e) { toast(`Failed to load ${file.name}: ${e.message}`, true); }
+    } catch (e) { toast(tt('loadFailed', file.name, e.message), true); }
   }
   renderAll();
   if (state.activeTable) refreshActiveView();
@@ -682,7 +851,7 @@ async function refreshTableView() {
   try {
     const cRes = await runQuery(topN ? `SELECT COUNT(*) AS c FROM (SELECT * FROM ${qid(tn)} ${where} ${topN}) sub` : `SELECT COUNT(*) AS c FROM ${qid(tn)} ${where}`);
     state.filteredRows = Number(cRes.rows[0].c);
-  } catch (e) { toast('Filter error: ' + e.message, true); return; }
+  } catch (e) { toast(tt('filterError', e.message), true); return; }
   
   const maxPage = Math.max(0, Math.ceil(state.filteredRows / state.pageSize) - 1);
   if (state.page > maxPage) state.page = maxPage;
@@ -696,7 +865,7 @@ async function refreshTableView() {
     state.rows = res.rows;
     renderContent();
     scheduleSave();
-  } catch (e) { toast('Query error: ' + e.message, true); }
+  } catch (e) { toast(tt('queryError', e.message), true); }
 }
 
 async function refreshActiveView() {
@@ -707,7 +876,7 @@ async function refreshActiveView() {
 // RENDER HELPERS
 function renderAll() {
   const root = $('#tb-tables'); root.innerHTML = '';
-  if (state.tables.length === 0) { root.appendChild(el('span', { style:'font-size:11px; color:var(--text-faint);' }, 'No tables loaded')); }
+  if (state.tables.length === 0) { root.appendChild(el('span', { style:'font-size:11px; color:var(--text-faint);' }, tt('noTables'))); }
   for (const t of state.tables) {
     root.appendChild(el('div', { class: 'tb-table-item' + (t.name === state.activeTable ? ' active' : ''), onclick: () => { state.activeTable = t.name; renderAll(); refreshActiveView(); } },
       el('span', { style:'max-width:140px; overflow:hidden; text-overflow:ellipsis;', title: t.name }, t.name),
@@ -745,14 +914,14 @@ async function dropTable(name) {
 function renderContent() {
   const root = $('#content'); root.innerHTML = '';
   if (!state.activeTable) {
-    const d = el('div', { class: 'dropzone big-dropzone', ondragover: (e) => { e.preventDefault(); d.classList.add('dragover'); }, ondragleave: () => d.classList.remove('dragover'), ondrop: (e) => { e.preventDefault(); d.classList.remove('dragover'); if (e.dataTransfer.files?.length) loadFiles(e.dataTransfer.files); }, onclick: () => $('#file-input').click() }, 'Drop .parquet here or click to pick');
-    root.appendChild(el('div', { class: 'splash' }, el('div', { style:'font-size:18px; font-weight:600; color:var(--text);' }, 'Parquet Explorer'), el('div', null, 'Drop a .parquet file to begin.'), d));
+    const d = el('div', { class: 'dropzone big-dropzone', ondragover: (e) => { e.preventDefault(); d.classList.add('dragover'); }, ondragleave: () => d.classList.remove('dragover'), ondrop: (e) => { e.preventDefault(); d.classList.remove('dragover'); if (e.dataTransfer.files?.length) loadFiles(e.dataTransfer.files); }, onclick: () => $('#file-input').click() }, tt('dropBrowse'));
+    root.appendChild(el('div', { class: 'splash' }, el('div', { style:'font-size:18px; font-weight:600; color:var(--text);' }, tt('splashTitle')), el('div', null, tt('splashHint')), d));
     return;
   }
   root.appendChild(el('div', { class: 'mode-tabs' },
-    el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, 'Table'),
-    el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, 'Pivot'),
-    el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, 'SQL')
+    el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, tt('table')),
+    el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, tt('pivot')),
+    el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, tt('sql'))
   ));
   if (state.mode === 'table') root.appendChild(renderTableMode());
   else if (state.mode === 'pivot') root.appendChild(renderPivotMode());
@@ -762,8 +931,8 @@ function renderContent() {
 function switchMode(m) {
   state.mode = m;
   const sidebar = $('#sidebar'), toggleBtn = $('#sidebar-toggle');
-  if (m === 'pivot') { sidebar.classList.add('collapsed'); toggleBtn.textContent = '▶ Schema'; }
-  else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = '◀ Schema'; }
+  if (m === 'pivot') { sidebar.classList.add('collapsed'); toggleBtn.textContent = tt('schemaHide'); }
+  else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = tt('schemaShow'); }
   renderContent();
   if (m === 'table') refreshTableView(); if (m === 'pivot') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
   scheduleSave();
@@ -774,7 +943,7 @@ function switchMode(m) {
 // ============================================================
 function renderTableMode() {
   const wrap = el('div', { class: 'grid-wrap' }), tn = state.activeTable, table = state.tables.find(t => t.name === tn), filters = state.filters[tn] || {}, sort = state.sorts[tn], pills = el('div', { class: 'pills-bar' });
-  if (sort) pills.appendChild(el('span', { class:'pill' }, `Sort: ${sort.col} ${sort.dir==='asc'?'↑':'↓'}`, el('span', { class:'x', onclick: () => { state.sorts[tn] = null; refreshTableView(); } }, '×')));
+  if (sort) pills.appendChild(el('span', { class:'pill' }, `${tt('sort')}: ${sort.col} ${sort.dir==='asc'?'↑':'↓'}`, el('span', { class:'x', onclick: () => { state.sorts[tn] = null; refreshTableView(); } }, '×')));
   for (const [col, f] of Object.entries(filters)) if (f) pills.appendChild(el('span', { class:'pill' }, `${col}: ${filterSummary(f)}`, el('span', { class:'x', onclick: () => { delete filters[col]; state.page = 0; refreshTableView(); } }, '×')));
   wrap.appendChild(pills);
   
@@ -793,7 +962,7 @@ function renderTableMode() {
   }
   grid.appendChild(el('thead', null, trHead));
   const tbody = el('tbody');
-  if (state.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: visCols.length, style:'text-align:center; padding:20px; color:var(--text-faint);' }, 'No rows.')));
+  if (state.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: visCols.length, style:'text-align:center; padding:20px; color:var(--text-faint);' }, tt('noRows'))));
   else {
     for (const r of state.rows) {
       const tr = el('tr');
@@ -805,25 +974,26 @@ function renderTableMode() {
   
   const pageCount = Math.max(1, Math.ceil(state.filteredRows / state.pageSize));
   const pageBtn = (label, onclick, disabled) => el('button', { class:'btn btn-sm', onclick, disabled: disabled?'':null, style: disabled?'opacity:0.4; cursor:not-allowed;':'' }, label);
+  const nloc = activeLocale().intl;
   wrap.appendChild(el('div', { class: 'statusbar' },
-    el('span', null, `${state.filteredRows.toLocaleString()} / ${state.totalRows.toLocaleString()} rows`),
-    state.filteredRows !== state.totalRows ? el('span', { style:'color:var(--accent);' }, `(filtered)`) : null,
+    el('span', null, tt('rowsOf', state.filteredRows.toLocaleString(nloc), state.totalRows.toLocaleString(nloc))),
+    state.filteredRows !== state.totalRows ? el('span', { style:'color:var(--accent);' }, tt('filtered')) : null,
     el('span', { style:'margin-left:auto; display:flex; gap:8px; align-items:center;' },
-      pageBtn('« First', () => { state.page = 0; refreshTableView(); }, state.page === 0),
-      pageBtn('‹ Prev', () => { state.page--; refreshTableView(); }, state.page === 0),
-      el('span', null, `Page ${state.page+1} / ${pageCount}`),
-      pageBtn('Next ›', () => { state.page++; refreshTableView(); }, state.page >= pageCount-1),
-      pageBtn('Last »', () => { state.page = pageCount-1; refreshTableView(); }, state.page >= pageCount-1),
+      pageBtn(tt('first'), () => { state.page = 0; refreshTableView(); }, state.page === 0),
+      pageBtn(tt('prev'), () => { state.page--; refreshTableView(); }, state.page === 0),
+      el('span', null, tt('pageOf', state.page+1, pageCount)),
+      pageBtn(tt('next'), () => { state.page++; refreshTableView(); }, state.page >= pageCount-1),
+      pageBtn(tt('last'), () => { state.page = pageCount-1; refreshTableView(); }, state.page >= pageCount-1),
       el('span', { style:'border-left:1px solid var(--border); padding-left:8px;' }, `${state.lastQueryMs.toFixed(0)} ms`),
-      el('button', { class:'btn btn-sm', onclick: () => openExportMenu('table') }, 'Export ⌄')
+      el('button', { class:'btn btn-sm', onclick: () => openExportMenu('table') }, tt('export'))
     )
   ));
   return wrap;
 }
 
 function filterSummary(f) {
-  if (f.type === 'values') return f.included ? `${f.included.size} value(s)` + (f.includeBlank?' +blanks':'') : (f.includeBlank?'blanks only':'none');
-  if (f.type === 'num' || f.type === 'date') return f.op === 'between' ? `${f.a}..${f.b}` : (f.op === 'topN' ? `top ${f.a}` : `${f.op} ${f.a}`);
+  if (f.type === 'values') return f.included ? tt('valueCount', f.included.size) + (f.includeBlank?tt('plusBlanks'):'') : (f.includeBlank?tt('blanksOnly'):tt('none'));
+  if (f.type === 'num' || f.type === 'date') return f.op === 'between' ? `${f.a}..${f.b}` : (f.op === 'topN' ? tt('topShort', f.a) : `${f.op} ${f.a}`);
   return `${f.not ? 'NOT ' : ''}${f.op}: ${f.a}`;
 }
 function kindLabel(k) { return k === 'num' ? '#' : (k === 'date' ? '📅' : (k === 'bool' ? '✓' : 'A')); }
@@ -925,11 +1095,11 @@ async function loadDistinctValues(colDef, more = false) {
 function renderFilterDialog(anchor) {
   $('#dialog-root').innerHTML = ''; const fdlg = state.fdlg; if (!fdlg) return;
   const dlg = el('div', { class: 'fdialog' });
-  dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); } }, '▲ Sort A→Z'), el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); } }, '▼ Sort Z→A'), el('button', { onclick: () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); } }, '✕ Clear')));
-  
-  const kind = fdlg.col.kind, tabsArr = [['values','Values']];
-  if (kind === 'num') tabsArr.push(['num','Number']); else if (kind === 'date') tabsArr.push(['date','Date']); else tabsArr.push(['text','Text']);
-  if (kind !== 'text' && !tabsArr.find(t => t[0] === 'text')) tabsArr.push(['text','Text']);
+  dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); } }, tt('sortAsc')), el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); } }, tt('sortDesc')), el('button', { onclick: () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); } }, tt('clearFilter'))));
+
+  const kind = fdlg.col.kind, tabsArr = [['values', tt('tabValues')]];
+  if (kind === 'num') tabsArr.push(['num', tt('tabNumber')]); else if (kind === 'date') tabsArr.push(['date', tt('tabDate')]); else tabsArr.push(['text', tt('tabText')]);
+  if (kind !== 'text' && !tabsArr.find(a => a[0] === 'text')) tabsArr.push(['text', tt('tabText')]);
   dlg.appendChild(el('div', { class: 'tabs' }, ...tabsArr.map(([k, label]) => el('div', { class: 'tab' + (fdlg.tab === k ? ' active' : ''), onclick: () => { fdlg.tab = k; renderFilterDialog(anchor); } }, label))));
   
   const body = el('div', { class: 'body' });
@@ -941,13 +1111,13 @@ function renderFilterDialog(anchor) {
       : (state.filters[state.activeTable]?.[fdlg.col.name]?.type !== 'values' ? state.filters[state.activeTable]?.[fdlg.col.name] : null);
     if (existingNonValues) {
       body.appendChild(el('div', { style:'padding:6px 8px; margin-bottom:6px; background:#edf4ff; border:1px solid #b6cdf6; border-radius:3px; font-size:11px; color:#1f6feb;' },
-        `Active ${existingNonValues.type} filter: ${filterSummary(existingNonValues)}. Only matching values are pre-selected below.`));
+        tt('activeFilterNote', existingNonValues.type, filterSummary(existingNonValues))));
     }
-    body.appendChild(el('input', { type:'text', placeholder:'Search values…', oninput: (e) => { fdlg.search = e.target.value; renderValuesList(listWrap); } }));
+    body.appendChild(el('input', { type:'text', class:'fdlg-search', placeholder: tt('searchValues'), oninput: (e) => { fdlg.search = e.target.value; renderValuesList(listWrap); } }));
     var listWrap = el('div', { style:'margin-top:6px;' });
     body.appendChild(listWrap); renderValuesList(listWrap);
     if (fdlg.values && fdlg.valuesLoaded < fdlg.valuesTotal) {
-      body.appendChild(el('button', { class:'btn btn-sm', style:'margin-top:6px; width:100%;', onclick: async (e) => { e.target.disabled = true; e.target.textContent = 'Loading…'; await loadDistinctValues(fdlg.col, true); renderValuesList(listWrap); e.target.disabled = false; e.target.textContent = fdlg.valuesLoaded < fdlg.valuesTotal ? `Load more (${fdlg.valuesLoaded} / ${fdlg.valuesTotal} loaded)` : 'All loaded'; if (fdlg.valuesLoaded >= fdlg.valuesTotal) e.target.disabled = true; } }, `Load more (${fdlg.valuesLoaded||0} / ${fdlg.valuesTotal||0} loaded)`));
+      body.appendChild(el('button', { class:'btn btn-sm', style:'margin-top:6px; width:100%;', onclick: async (e) => { e.target.disabled = true; e.target.textContent = tt('loading'); await loadDistinctValues(fdlg.col, true); renderValuesList(listWrap); e.target.disabled = false; e.target.textContent = fdlg.valuesLoaded < fdlg.valuesTotal ? tt('loadMore', fdlg.valuesLoaded, fdlg.valuesTotal) : tt('allLoaded'); if (fdlg.valuesLoaded >= fdlg.valuesTotal) e.target.disabled = true; } }, tt('loadMore', fdlg.valuesLoaded||0, fdlg.valuesTotal||0)));
     }
   } else {
     // Each tab type has its own independent adv state so values don't bleed across tabs.
@@ -955,22 +1125,22 @@ function renderFilterDialog(anchor) {
     adv.type = fdlg.tab;
     const wrap = el('div', { style:'display:flex; flex-direction:column; gap:8px;' });
     if (fdlg.tab === 'num') {
-      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>','>'],['>=','≥'],['<','<'],['<=','≤'],['=','='],['!=','≠'],['between','between'],['topN','top N']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
-      wrap.appendChild(el('input', { type:'number', placeholder: adv.op === 'topN' ? 'N (e.g. 10)' : 'value', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
-      if (adv.op === 'between') wrap.appendChild(el('input', { type:'number', placeholder:'upper bound', value: adv.b ?? '', oninput: (e) => adv.b = e.target.value }));
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>',tt('opGt')],['>=',tt('opGe')],['<',tt('opLt')],['<=',tt('opLe')],['=',tt('opEq')],['!=',tt('opNe')],['between',tt('opBetween')],['topN',tt('opTopN')]].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('input', { type:'number', placeholder: adv.op === 'topN' ? tt('topNPh') : tt('valuePh'), value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
+      if (adv.op === 'between') wrap.appendChild(el('input', { type:'number', placeholder: tt('upperPh'), value: adv.b ?? '', oninput: (e) => adv.b = e.target.value }));
     } else if (fdlg.tab === 'date') {
-      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>','after'],['>=','on or after'],['<','before'],['<=','on or before'],['=','equals'],['between','between']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>',tt('dAfter')],['>=',tt('dOnAfter')],['<',tt('dBefore')],['<=',tt('dOnBefore')],['=',tt('dEquals')],['between',tt('opBetween')]].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
       wrap.appendChild(el('input', { type:'date', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
       if (adv.op === 'between') wrap.appendChild(el('input', { type:'date', value: adv.b ?? '', oninput: (e) => adv.b = e.target.value }));
     } else {
-      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; } }, ...[['contains','contains'],['begins','begins with'],['ends','ends with'],['eq','equals'],['regex','regex']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
-      wrap.appendChild(el('input', { type:'text', placeholder:'value', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
-      wrap.appendChild(el('label', { style:'display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12px; cursor:pointer; user-select:none;' }, el('input', { type:'checkbox', checked: adv.not ? '' : null, onchange: (e) => { adv.not = e.target.checked; } }), 'Exclude (NOT)'));
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; } }, ...[['contains',tt('tContains')],['begins',tt('tBegins')],['ends',tt('tEnds')],['eq',tt('tEquals')],['regex',tt('tRegex')]].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('input', { type:'text', placeholder: tt('valuePh'), value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
+      wrap.appendChild(el('label', { style:'display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12px; cursor:pointer; user-select:none;' }, el('input', { type:'checkbox', checked: adv.not ? '' : null, onchange: (e) => { adv.not = e.target.checked; } }), tt('excludeNot')));
     }
     body.appendChild(wrap);
   }
   dlg.appendChild(body);
-  dlg.appendChild(el('div', { class: 'footer' }, el('button', { onclick: () => closeDialog() }, 'Cancel'), el('button', { class:'primary', onclick: () => applyFilterDialog() }, 'OK')));
+  dlg.appendChild(el('div', { class: 'footer' }, el('button', { onclick: () => closeDialog() }, tt('cancel')), el('button', { class:'primary', onclick: () => applyFilterDialog() }, tt('ok'))));
   $('#dialog-root').appendChild(dlg);
   const rect = anchor.getBoundingClientRect(); dlg.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px'; dlg.style.top = Math.min(window.innerHeight - 500, rect.bottom + 4) + 'px';
   if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler);
@@ -983,19 +1153,19 @@ function renderValuesList(container) {
   // Preserve scroll position of the inner list so checkbox clicks don't jump to top
   const savedScroll = container.querySelector('.vlist')?.scrollTop ?? 0;
   container.innerHTML = '';
-  if (!fdlg.values) { container.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, 'Loading…')); return; }
+  if (!fdlg.values) { container.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('loading'))); return; }
   const search = (fdlg.search || '').toLowerCase();
   const items = fdlg.values.filter(v => !search || String(v.value).toLowerCase().includes(search));
 
   // ── Select All row (label and behaviour depend on whether a search is active) ──
   const isSearching = !!search;
-  const selectAllLabel = isSearching ? '(Select All Search Results)' : '(Select All)';
+  const selectAllLabel = isSearching ? tt('selectAllSearch') : tt('selectAll');
   const selectAllChecked = isSearching
     ? items.length > 0 && items.every(it => fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value)))
     : !!fdlg.selectAll;
   const countBadge = isSearching
-    ? `${items.length} match${items.length !== 1 ? 'es' : ''}`
-    : (fdlg.valuesTotal ? `${fdlg.valuesTotal} unique` : '');
+    ? tt('matches', items.length)
+    : (fdlg.valuesTotal ? tt('unique', fdlg.valuesTotal) : '');
 
   container.appendChild(el('div', { style:'border-bottom:1px solid var(--border); padding-bottom:4px; margin-bottom:2px;' },
     el('label', { class:'vlist-item' },
@@ -1033,11 +1203,11 @@ function renderValuesList(container) {
         fdlg.selectAll = false;
         // Clear search state and update the search input DOM element
         fdlg.search = '';
-        const inp = container.closest('.body')?.querySelector('input[placeholder="Search values…"]');
+        const inp = container.closest('.body')?.querySelector('input.fdlg-search');
         if (inp) inp.value = '';
         renderValuesList(container);
       }
-    }, '+ Add Current Selection to Filter'));
+    }, tt('addSelection')));
   }
 
   // ── Individual value rows ──
@@ -1052,10 +1222,10 @@ function renderValuesList(container) {
         renderValuesList(container);
       }}),
       el('span', { class:'val' }, String(it.value)),
-      el('span', { class:'count' }, it.count.toLocaleString())
+      el('span', { class:'count' }, it.count.toLocaleString(activeLocale().intl))
     ));
   }
-  if (items.length === 0 && !fdlg.hasNulls) scroll.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, 'No matches.'));
+  if (items.length === 0 && !fdlg.hasNulls) scroll.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('noMatches')));
   if (fdlg.hasNulls && (!search || '(blanks)'.includes(search) || '(null)'.includes(search))) {
     scroll.appendChild(el('div', { style:'border-top:1px solid var(--border); margin-top:4px; padding-top:4px;' },
       el('label', { class:'vlist-item' },
@@ -1065,8 +1235,8 @@ function renderValuesList(container) {
           if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
           renderValuesList(container);
         }}),
-        el('span', { class:'val null' }, '(Blanks / NULL)'),
-        el('span', { class:'count' }, (fdlg.nullCount||0).toLocaleString())
+        el('span', { class:'val null' }, tt('blanksNull')),
+        el('span', { class:'count' }, (fdlg.nullCount||0).toLocaleString(activeLocale().intl))
       )
     ));
   }
@@ -1109,16 +1279,19 @@ function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mo
 // ============================================================
 function renderPivotMode() {
   const wrap = el('div', { class:'pivot-mode' });
-  wrap.appendChild(renderPivotFields());
+  const fields = renderPivotFields();
+  fields.style.setProperty('--pf-width', (state.settings.pivotFieldsWidth || 320) + 'px');
+  wrap.appendChild(fields);
+  wrap.appendChild(makeColResizer(fields, '--pf-width', 'pivotFieldsWidth', 200, 640));
   const content = el('div', { class:'pivot-content' });
   content.appendChild(renderPivotToolbar());
-  
+
   const reportFilters = renderPivotReportFilters();
   if (reportFilters) content.appendChild(reportFilters);
 
   const scroll = el('div', { class:'grid-scroll', id: 'pivot-grid-scroll' });
   if (state.pivotShape) scroll.appendChild(renderPivotGrid());
-  else scroll.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, 'Add fields to Rows / Columns / Values to build a pivot.'));
+  else scroll.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, tt('pivotEmpty')));
   content.appendChild(scroll);
   content.appendChild(renderPivotStatusBar());
   wrap.appendChild(content); return wrap;
@@ -1126,7 +1299,7 @@ function renderPivotMode() {
 
 function renderPivotFields() {
   const tn = state.activeTable, table = state.tables.find(t => t.name === tn), pv = state.pivot[tn], wrap = el('div', { class:'pivot-fields' });
-  wrap.appendChild(el('div', { class:'pivot-fields-h' }, 'PivotTable Fields'));
+  wrap.appendChild(el('div', { class:'pivot-fields-h' }, tt('pivotFields')));
 
   // One row builder, reused by both the initial list and the live search filter.
   const fieldRow = (c) => {
@@ -1138,7 +1311,7 @@ function renderPivotFields() {
   };
   const fillFields = (q) => { listWrap.innerHTML = ''; for (const c of table.schema.filter(c => !q || c.name.toLowerCase().includes(q))) listWrap.appendChild(fieldRow(c)); };
 
-  wrap.appendChild(el('input', { type:'text', placeholder:'Search fields…', style:'margin:6px 8px; padding:4px 6px; border:1px solid var(--border); border-radius:3px; font-size:12px; width:calc(100% - 16px); box-sizing:border-box; flex-shrink:0;', oninput: (e) => fillFields(e.target.value.toLowerCase()) }));
+  wrap.appendChild(el('input', { type:'text', placeholder: tt('searchFields'), style:'margin:6px 8px; padding:4px 6px; border:1px solid var(--border); border-radius:3px; font-size:12px; width:calc(100% - 16px); box-sizing:border-box; flex-shrink:0;', oninput: (e) => fillFields(e.target.value.toLowerCase()) }));
   const listWrap = el('div', { class:'pivot-fields-list' });
   fillFields('');
   wrap.appendChild(listWrap);
@@ -1151,7 +1324,7 @@ function renderPivotFields() {
     if (key === 'values') pv.values.push({ col, filter, agg: agg || (c?.kind === 'num' ? 'SUM' : 'COUNT') }); else pv[key].push({ col, filter });
     refreshPivotView();
   }}, el('div', { class:'pivot-tile-h' }, icon, label), (() => { const body = el('div', { class:'pivot-tile-body' }); items.forEach((it, idx) => body.appendChild(renderChip(key, it, idx))); return body; })());
-  tilesWrap.appendChild(tile('filters', 'Filters', iconEl(ICONS.funnel), pv.filters)); tilesWrap.appendChild(tile('cols', 'Columns', iconEl(ICONS.cols), pv.cols)); tilesWrap.appendChild(tile('rows', 'Rows', iconEl(ICONS.rows), pv.rows)); tilesWrap.appendChild(tile('values', 'Σ Values', iconEl(ICONS.sigma), pv.values, true));
+  tilesWrap.appendChild(tile('filters', tt('tileFilters'), iconEl(ICONS.funnel), pv.filters)); tilesWrap.appendChild(tile('cols', tt('tileColumns'), iconEl(ICONS.cols), pv.cols)); tilesWrap.appendChild(tile('rows', tt('tileRows'), iconEl(ICONS.rows), pv.rows)); tilesWrap.appendChild(tile('values', tt('tileValues'), iconEl(ICONS.sigma), pv.values, true));
   wrap.appendChild(tilesWrap); return wrap;
 }
 
@@ -1190,13 +1363,13 @@ function renderPivotReportFilters() {
   if (!pv.filters || pv.filters.length === 0) return null;
   const wrap = el('div', { class: 'pivot-report-filters' });
   for (const f of pv.filters) {
-    let filterText = '(All)';
+    let filterText = tt('allFilter');
     if (f.filter) {
       if (f.filter.type === 'values') {
         if (f.filter.included && f.filter.included.size === 1) filterText = [...f.filter.included][0];
-        else if (f.filter.included && f.filter.included.size > 1) filterText = '(Multiple Items)';
-        else filterText = '(Custom)';
-      } else filterText = '(Custom)';
+        else if (f.filter.included && f.filter.included.size > 1) filterText = tt('multipleItems');
+        else filterText = tt('custom');
+      } else filterText = tt('custom');
     }
     const hasActiveFilter = !!f.filter;
     wrap.appendChild(el('div', { class: 'prf-row' },
@@ -1212,12 +1385,13 @@ function renderPivotReportFilters() {
 
 function renderPivotToolbar() {
   const pv = state.pivot[state.activeTable];
+  const stLabels = { top: tt('stTop'), bottom: tt('stBottom'), off: tt('stOff') };
   return el('div', { class:'pivot-toolbar' },
-    el('span', null, 'Subtotals:'), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, o))),
-    el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, 'Expand All'),
-    el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, 'Collapse All'),
-    el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, 'Clear'),
-    el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, 'Export ⌄'))
+    el('span', null, tt('subtotals')), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, stLabels[o]))),
+    el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
+    el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
+    el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, tt('clear')),
+    el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
 }
 
@@ -1229,7 +1403,7 @@ function expandAll(pv) {
   }
   return { rows: rs, cols: cs };
 }
-function renderPivotStatusBar() { return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? `${state.pivotShape.leafRows.length.toLocaleString()} row groups · ${state.pivotShape.leafCols.length.toLocaleString()} column groups` : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
+function renderPivotStatusBar() { const nloc = activeLocale().intl; return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? tt('rowGroups', state.pivotShape.leafRows.length.toLocaleString(nloc), state.pivotShape.leafCols.length.toLocaleString(nloc)) : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
 
 async function refreshPivotView() {
   const tn = state.activeTable, pv = state.pivot[tn], table = state.tables.find(t => t.name === tn);
@@ -1255,7 +1429,7 @@ async function refreshPivotView() {
     if (pv._dimSig !== sig && state.pivotShape) { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; pv._dimSig = sig; }
     renderContent();
     scheduleSave();
-  } catch (e) { console.error(e); toast('Pivot query failed: ' + e.message, true); }
+  } catch (e) { console.error(e); toast(tt('pivotFailed', e.message), true); }
 }
 
 function rebuildPivotShape() {
@@ -1307,7 +1481,7 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
       if (pv.subtotals !== 'off' && !isRoot) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
     } else if (!isRoot) leafCols.push({ ...node, isColSubtotal: false, isCollapsed: true });
   }
-  if (colDims.length === 0) leafCols.push({ key:'__all', label:'Total', vals:[], depth: -1, isColSubtotal: false }); else colTreeRoot.children.forEach(walkCol);
+  if (colDims.length === 0) leafCols.push({ key:'__all', label:tt('total'), vals:[], depth: -1, isColSubtotal: false }); else colTreeRoot.children.forEach(walkCol);
 
   const leafRows = [], flatRowOrder = [];
   function walkRow(node) {
@@ -1343,7 +1517,7 @@ function renderPivotGrid() {
     const tr = el('tr');
     if (lvl === 0) tr.appendChild(el('th', { class:'label', rowspan: colHeaderRows + (nValues > 1 ? 1 : 0) }, sh.rowDims.length ? sh.rowDims.join(' / ') : ''));
 
-    if (!hasColDims) { tr.appendChild(el('th', { colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, 'Grand Total')); thead.appendChild(tr); continue; }
+    if (!hasColDims) { tr.appendChild(el('th', { colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, tt('grandTotal'))); thead.appendChild(tr); continue; }
 
     let i = 0;
     while (i < sh.leafCols.length) {
@@ -1377,7 +1551,7 @@ function renderPivotGrid() {
       th.appendChild(document.createTextNode(label === 'null' || label === 'undefined' ? '∅' : label));
       tr.appendChild(th); i = j;
     }
-    if (lvl === 0) tr.appendChild(el('th', { rowspan: colHeaderRows, colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, 'Grand Total'));
+    if (lvl === 0) tr.appendChild(el('th', { rowspan: colHeaderRows, colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, tt('grandTotal')));
     thead.appendChild(tr);
   }
 
@@ -1411,7 +1585,7 @@ function renderPivotGrid() {
 
     // "Automotive Total" → "Automotive" (no suffix); label font weight: bold only at depth 0
     const labelStr = isGrand
-      ? 'Grand Total'
+      ? tt('grandTotal')
       : node.label;   // suffix removed; hierarchy is clear from indentation + bold
 
     const labelTd = el('td', { class:'label', style: `padding-left:${8 + (node.depth + 1) * 12}px; font-weight:${isSubtotal && node.depth === 0 ? '700' : (isSubtotal ? '600' : '400')};` });
@@ -1470,12 +1644,12 @@ let sqlEditor = null;
 function renderSQLMode() {
   const wrap = el('div', { class:'sql-mode' });
   wrap.appendChild(el('div', { class:'sql-edit-wrap' }, el('textarea', { id:'sql-editor-ta' }, state.sqlText)));
-  wrap.appendChild(el('div', { class:'sql-toolbar' }, el('button', { class:'primary', onclick: runSQLEditor }, '▶ Run (Ctrl/Cmd+Enter)'), el('span', { style:'color:var(--text-faint); font-size:11px;' }, 'Loaded tables are queryable by name.'), el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('sql'), disabled: state.sqlResult ? null : '' }, 'Export Result ⌄'))));
+  wrap.appendChild(el('div', { class:'sql-toolbar' }, el('button', { class:'primary', onclick: runSQLEditor }, tt('run')), el('span', { style:'color:var(--text-faint); font-size:11px;' }, tt('sqlHint')), el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('sql'), disabled: state.sqlResult ? null : '' }, tt('exportResult')))));
   if (state.sqlError) wrap.appendChild(el('div', { class:'sql-error' }, state.sqlError));
   const resultWrap = el('div', { class:'grid-scroll', style:'flex:1;' });
-  if (state.sqlResult) resultWrap.appendChild(renderSimpleGrid(state.sqlResult.rows, state.sqlResult.columns)); else resultWrap.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, 'Run a query to see results.'));
+  if (state.sqlResult) resultWrap.appendChild(renderSimpleGrid(state.sqlResult.rows, state.sqlResult.columns)); else resultWrap.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, tt('runToSee')));
   wrap.appendChild(resultWrap);
-  wrap.appendChild(el('div', { class:'statusbar' }, el('span', null, state.sqlResult ? `${state.sqlResult.rows.length.toLocaleString()} rows` : ''), el('span', { style:'margin-left:auto;' }, state.sqlResult ? `${state.sqlResult.ms.toFixed(0)} ms` : '')));
+  wrap.appendChild(el('div', { class:'statusbar' }, el('span', null, state.sqlResult ? tt('rowsN', state.sqlResult.rows.length.toLocaleString(activeLocale().intl)) : ''), el('span', { style:'margin-left:auto;' }, state.sqlResult ? `${state.sqlResult.ms.toFixed(0)} ms` : '')));
   return wrap;
 }
 
@@ -1501,7 +1675,7 @@ function renderSimpleGrid(rows, columns) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
-  if (rows.length > limit) tbody.appendChild(el('tr', null, el('td', { colspan: columns.length, style:'text-align:center; padding:8px; color:var(--text-faint);' }, `…${(rows.length - limit).toLocaleString()} more rows omitted from display`)));
+  if (rows.length > limit) tbody.appendChild(el('tr', null, el('td', { colspan: columns.length, style:'text-align:center; padding:8px; color:var(--text-faint);' }, tt('moreRows', (rows.length - limit).toLocaleString(activeLocale().intl)))));
   return table;
 }
 
@@ -1511,13 +1685,13 @@ function renderSimpleGrid(rows, columns) {
 function openExportMenu(source) {
   const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
-  const locLabel = (LOCALES[state.settings.locale] || LOCALES.de).intl === 'de-DE' ? 'German' : 'US';
+  const locLabel = (LOCALES[state.settings.locale] || LOCALES.de).intl === 'de-DE' ? 'DE' : 'US';
   const item = (label, fn, extra) => el('div', { class:'ctx-menu-item row', onclick: () => { close(); fn(); } }, el('span', null, label), extra || null);
   const menu = el('div', { class:'ctx-menu', style:'right:16px; bottom:40px; min-width:200px;' },
-    el('div', { class:'ctx-menu-h' }, 'Spreadsheet'),
+    el('div', { class:'ctx-menu-h' }, tt('expSpreadsheet')),
     item('Excel (.xlsx)', () => exportXlsx(source), el('span', { class:'badge-sm' }, locLabel)),
     el('div', { class:'ctx-menu-sep' }),
-    el('div', { class:'ctx-menu-h' }, 'Data'),
+    el('div', { class:'ctx-menu-h' }, tt('expData')),
     item('CSV', () => doExport(source, 'csv')),
     item('JSON', () => doExport(source, 'json')),
     item('Parquet', () => doExport(source, 'parquet'))
@@ -1571,20 +1745,20 @@ function buildPivotWorksheet() {
   const sh = state.pivotShape; if (!sh) return null;
   const nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
   const valLabel = (vd) => `${vd.agg.replace('_', ' ')}(${vd.col})`;
-  const colPath = (col) => (col.vals && col.vals.length) ? col.vals.map(v => v === null || v === undefined ? '∅' : String(v)).join(' / ') : 'Total';
+  const colPath = (col) => (col.vals && col.vals.length) ? col.vals.map(v => v === null || v === undefined ? '∅' : String(v)).join(' / ') : tt('total');
 
-  const header = [sh.rowDims.length ? sh.rowDims.join(' / ') : 'Total'];
+  const header = [sh.rowDims.length ? sh.rowDims.join(' / ') : tt('total')];
   for (const col of sh.leafCols) {
-    const label = col.isColSubtotal ? colPath(col) + ' Total' : colPath(col);
+    const label = col.isColSubtotal ? colPath(col) + ' ' + tt('total') : colPath(col);
     for (const vd of sh.valueDefs) header.push(nValues > 1 ? `${label} · ${valLabel(vd)}` : label);
   }
-  if (hasColDims) for (const vd of sh.valueDefs) header.push(nValues > 1 ? `Grand Total · ${valLabel(vd)}` : 'Grand Total');
+  if (hasColDims) for (const vd of sh.valueDefs) header.push(nValues > 1 ? `${tt('grandTotal')} · ${valLabel(vd)}` : tt('grandTotal'));
 
   const aoa = [header];
   for (const entry of sh.flatRowOrder) {
     const node = entry.node, isGrand = !!entry.isGrand;
     const indent = isGrand ? '' : '    '.repeat(node.depth);
-    const row = [indent + (isGrand ? 'Grand Total' : node.label)];
+    const row = [indent + (isGrand ? tt('grandTotal') : node.label)];
     const rKey = isGrand ? '' : safeJoin(node.vals);
     for (const leafCol of sh.leafCols) {
       const cell = sh.cellMap.get(rKey + '#' + safeJoin(leafCol.vals));
@@ -1600,14 +1774,14 @@ function buildPivotWorksheet() {
 }
 
 async function exportXlsx(source) {
-  if (typeof XLSX === 'undefined') { toast('Excel library still loading — try again in a moment', true); return; }
+  if (typeof XLSX === 'undefined') { toast(tt('excelLoading'), true); return; }
   try {
     let ws, sheetName, fileBase;
     if (source === 'pivot') {
-      if (!state.pivotShape) { toast('Add fields to build a pivot first', true); return; }
+      if (!state.pivotShape) { toast(tt('buildPivotFirst'), true); return; }
       ws = buildPivotWorksheet(); sheetName = 'Pivot'; fileBase = (state.activeTable || 'pivot') + '_pivot';
     } else if (source === 'sql') {
-      if (!state.sqlResult) { toast('Run a query first', true); return; }
+      if (!state.sqlResult) { toast(tt('runQueryFirst'), true); return; }
       ws = buildWorksheetFromRows(state.sqlResult.rows, state.sqlResult.columns); sheetName = 'Query'; fileBase = 'query_result';
     } else {
       const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
@@ -1620,8 +1794,8 @@ async function exportXlsx(source) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, (sheetName || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31) || 'Sheet1');
     XLSX.writeFile(wb, `${fileBase}_${Date.now()}.xlsx`, { bookType: 'xlsx', cellDates: true });
-    toast(`Exported Excel (${activeLocale().intl} formatting)`);
-  } catch (e) { console.error(e); toast('Excel export failed: ' + e.message, true); }
+    toast(tt('exportedExcel', activeLocale().intl));
+  } catch (e) { console.error(e); toast(tt('excelFailed', e.message), true); }
 }
 
 async function doExport(source, format) {
@@ -1644,43 +1818,72 @@ async function doExport(source, format) {
     const a = document.createElement('a'); a.href = url; a.download = outName; document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     try { await state.db.dropFile(outName); } catch (_) {}
-    toast(`Exported ${outName}`);
-  } catch (e) { toast('Export failed: ' + e.message, true); }
+    toast(tt('exported', outName));
+  } catch (e) { toast(tt('exportFailed', e.message), true); }
 }
 
 // ============================================================
-// SETTINGS MENU
+// SETTINGS & SESSION MENUS
 // ============================================================
-function openSettingsMenu(anchor) {
-  const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
-  const outside = (ev) => { if (!menu.contains(ev.target) && ev.target !== anchor) close(); };
-  const check = (on) => el('span', { class:'check' }, on ? '✓' : '');
-
-  const localeItem = (key) => el('div', { class:'ctx-menu-item row', onclick: () => {
-    state.settings.locale = key; rebuildNumberFormats(); renderContent(); savePrefsNow(); close();
-  }}, el('span', null, check(state.settings.locale === key), ' ' + LOCALES[key].label));
-
-  const rememberToggle = el('label', { class:'toggle', onclick: (e) => e.stopPropagation() },
+function buildRememberToggle() {
+  return el('label', { class:'toggle', onclick: (e) => e.stopPropagation() },
     el('input', { type:'checkbox', checked: state.settings.rememberFiles ? '' : null, onchange: async (e) => {
       state.settings.rememberFiles = e.target.checked;
-      if (e.target.checked) { for (const t of state.tables) { try { const b = await state.db.copyFileToBuffer(t.file); await idbPut(t.name, { fileName: t.origName || t.name, buffer: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }); } catch (_) {} } toast('Files will be remembered in this browser'); }
-      else { try { await idbClear(); } catch (_) {} toast('Stored files cleared'); }
-      savePrefsNow();
+      if (e.target.checked) { for (const t of state.tables) { try { const b = await state.db.copyFileToBuffer(t.file); await idbPut(t.name, { fileName: t.origName || t.name, buffer: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }); } catch (_) {} } toast(tt('rememberOn')); }
+      else { try { await idbClear(); } catch (_) {} toast(tt('rememberOff')); }
+      savePrefsNow(); updateSaveStatus();
     }}),
     el('span', { class:'track' })
   );
-
-  const menu = el('div', { class:'ctx-menu', style:'right:16px; top:44px; min-width:230px;' },
-    el('div', { class:'ctx-menu-h' }, 'Number / date format'),
-    localeItem('de'), localeItem('en'),
-    el('div', { class:'ctx-menu-sep' }),
-    el('div', { class:'ctx-menu-h' }, 'Session'),
-    el('div', { class:'ctx-menu-item row', onclick: (e) => e.stopPropagation() }, el('span', null, 'Remember files & settings'), rememberToggle),
-    el('div', { class:'ctx-menu-item', onclick: () => { savePrefsNow(); toast('Settings saved'); close(); } }, 'Save now'),
-    el('div', { class:'ctx-menu-sep' }),
-    el('div', { class:'ctx-menu-item danger', onclick: async () => { close(); if (confirm('Forget all saved view settings and stored files? Loaded tables stay in this session.')) { try { localStorage.removeItem(PREFS_KEY); await idbClear(); } catch (_) {} toast('Saved data cleared'); } } }, 'Clear saved data')
-  );
+}
+function openMenu(anchor, menu) {
+  const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
+  const outside = (ev) => { if (!menu.contains(ev.target) && ev.target !== anchor) close(); };
+  menu._close = close;
   $('#dialog-root').appendChild(menu); setTimeout(() => document.addEventListener('mousedown', outside), 0);
+}
+
+function openSettingsMenu(anchor) {
+  const check = (on) => el('span', { class:'check' }, on ? '✓' : '');
+  let menu;
+  const langItem = (key) => el('div', { class:'ctx-menu-item row', onclick: () => {
+    state.settings.lang = key; applyStaticTexts();
+    if (state.mode === 'sql') sqlEditor = null;     // force CodeMirror to re-attach to the new textarea
+    renderAll(); refreshActiveView();
+    if (state.mode === 'sql') setTimeout(initSQLEditor, 0);
+    savePrefsNow(); menu._close();
+  }}, el('span', null, check(state.settings.lang === key), ' ' + I18N[key].langName));
+  const localeItem = (key) => el('div', { class:'ctx-menu-item row', onclick: () => {
+    state.settings.locale = key; rebuildNumberFormats(); renderContent(); updateSaveStatus(); savePrefsNow(); menu._close();
+  }}, el('span', null, check(state.settings.locale === key), ' ' + LOCALES[key].label));
+  menu = el('div', { class:'ctx-menu', style:'right:16px; top:44px; min-width:230px;' },
+    el('div', { class:'ctx-menu-h' }, tt('language')),
+    langItem('de'), langItem('en'),
+    el('div', { class:'ctx-menu-sep' }),
+    el('div', { class:'ctx-menu-h' }, tt('numberDateFormat')),
+    localeItem('de'), localeItem('en')
+  );
+  openMenu(anchor, menu);
+}
+
+function openSessionMenu(anchor) {
+  let menu;
+  const lastTime = state._lastSaved ? new Date(state._lastSaved).toLocaleTimeString(activeLocale().intl) : null;
+  const statusText = state.settings.rememberFiles
+    ? '✅ ' + tt('statusOn')
+    : '⚠️ ' + tt('statusOff');
+  menu = el('div', { class:'ctx-menu', style:'right:16px; top:44px; min-width:260px;' },
+    el('div', { class:'ctx-menu-h' }, tt('session')),
+    el('div', { class:'ctx-menu-item row', style:'cursor:default;', onclick: (e) => e.stopPropagation() }, el('span', null, tt('rememberToggle')), buildRememberToggle()),
+    el('div', { class:'ctx-menu-item', style:'cursor:default; color:var(--text-dim); font-size:11px; display:flex; flex-direction:column; align-items:flex-start; gap:2px;', onclick: (e) => e.stopPropagation() },
+      el('span', null, statusText),
+      el('span', { style:'color:var(--text-faint);' }, lastTime ? tt('lastSaved', lastTime) : tt('neverSaved'))
+    ),
+    el('div', { class:'ctx-menu-sep' }),
+    el('div', { class:'ctx-menu-item', onclick: () => { savePrefsNow(); toast(tt('settingsSaved')); menu._close(); } }, '💾 ' + tt('saveNow')),
+    el('div', { class:'ctx-menu-item danger', onclick: async () => { menu._close(); if (confirm(tt('confirmClear'))) { try { localStorage.removeItem(PREFS_KEY); await idbClear(); } catch (_) {} toast(tt('clearedData')); } } }, '🗑 ' + tt('clearSaved'))
+  );
+  openMenu(anchor, menu);
 }
 
 // ============================================================
@@ -1693,7 +1896,7 @@ async function restoreSession(prefs) {
   if (!files || files.length === 0) return;
   const order = Object.keys(prefs.tables || {});
   files.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
-  $('#duckdb-status').textContent = 'restoring…';
+  setDbStatus('restoring');
   let restored = 0;
   for (const { key, value } of files) {
     try {
@@ -1702,15 +1905,15 @@ async function restoreSession(prefs) {
       restored++;
     } catch (e) { console.warn('Restore failed for', key, e); try { await idbDelete(key); } catch (_) {} }
   }
-  $('#duckdb-status').textContent = 'duckdb ready';
+  setDbStatus('ready');
   if (!restored) return;
   state.mode = prefs.global?.mode || 'table';
   state.activeTable = (prefs.activeTable && state.tables.some(t => t.name === prefs.activeTable)) ? prefs.activeTable : state.tables[0].name;
-  if (state.mode === 'pivot') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = '▶ Schema'; }
+  if (state.mode === 'pivot') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = tt('schemaHide'); }
   renderAll();
   refreshActiveView();
   if (state.mode === 'sql') setTimeout(initSQLEditor, 0);
-  toast(`Restored ${restored} table${restored > 1 ? 's' : ''} from your last session`);
+  toast(tt('restored', restored));
 }
 
 // ============================================================
@@ -1720,10 +1923,14 @@ async function restoreSession(prefs) {
   // Apply persisted global settings before first paint so the UI comes up consistent.
   const prefs = loadPrefs();
   if (prefs?.global) {
-    if (prefs.global.locale && LOCALES[prefs.global.locale]) state.settings.locale = prefs.global.locale;
-    state.settings.rememberFiles = prefs.global.rememberFiles !== false;
-    if (prefs.global.pageSize) state.pageSize = prefs.global.pageSize;
-    if (prefs.global.mode) state.mode = prefs.global.mode;
+    const g = prefs.global;
+    if (g.lang && I18N[g.lang]) state.settings.lang = g.lang;
+    if (g.locale && LOCALES[g.locale]) state.settings.locale = g.locale;
+    state.settings.rememberFiles = g.rememberFiles !== false;
+    if (g.sidebarWidth) state.settings.sidebarWidth = g.sidebarWidth;
+    if (g.pivotFieldsWidth) state.settings.pivotFieldsWidth = g.pivotFieldsWidth;
+    if (g.pageSize) state.pageSize = g.pageSize;
+    if (g.mode) state.mode = g.mode;
     if (typeof prefs.sqlText === 'string') state.sqlText = prefs.sqlText;
     rebuildNumberFormats();
   }
@@ -1733,15 +1940,22 @@ async function restoreSession(prefs) {
   tbz.addEventListener('dragleave', () => tbz.classList.remove('dragover'));
   tbz.addEventListener('drop', (e) => { e.preventDefault(); tbz.classList.remove('dragover'); if (e.dataTransfer.files?.length) loadFiles(e.dataTransfer.files); });
   tbz.addEventListener('click', () => $('#file-input').click());
-  $('#sidebar-toggle').addEventListener('click', () => { const sb = $('#sidebar'); sb.classList.toggle('collapsed'); $('#sidebar-toggle').textContent = sb.classList.contains('collapsed') ? '▶ Schema' : '◀ Schema'; scheduleSave(); });
+  $('#sidebar-toggle').addEventListener('click', () => { const sb = $('#sidebar'); sb.classList.toggle('collapsed'); $('#sidebar-toggle').textContent = sb.classList.contains('collapsed') ? tt('schemaHide') : tt('schemaShow'); scheduleSave(); });
   $('#settings-btn').addEventListener('click', (e) => openSettingsMenu(e.currentTarget));
+  $('#session-btn').addEventListener('click', (e) => openSessionMenu(e.currentTarget));
+  $('#save-status').addEventListener('click', (e) => openSessionMenu(e.currentTarget));
   window.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
   window.addEventListener('drop', (e) => { if (e.dataTransfer.files?.length) { e.preventDefault(); loadFiles(e.dataTransfer.files); } });
   $('#file-input').addEventListener('change', (e) => { if (e.target.files?.length) loadFiles(e.target.files); e.target.value = ''; });
-  if (prefs?.global?.sidebarCollapsed) { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = '▶ Schema'; }
+  if (prefs?.global?.sidebarCollapsed) { $('#sidebar').classList.add('collapsed'); }
 
+  // Resizable schema sidebar (the splitter sits right after it in the DOM).
+  applyPanelWidths();
+  $('#sidebar').after(makeColResizer($('#sidebar'), '--sb-width', 'sidebarWidth', 150, 600));
+
+  applyStaticTexts();
   renderAll();
-  try { await initDuckDB(); } catch (e) { $('#duckdb-status').textContent = 'duckdb FAILED'; toast('DuckDB initialization failed: ' + e.message, true); return; }
+  try { await initDuckDB(); } catch (e) { setDbStatus('failed'); toast(tt('duckFailed', e.message), true); return; }
   try { await restoreSession(prefs); } catch (e) { console.warn('Session restore failed:', e); }
 })();
 </script>
