@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parquet Explorer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/idea.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f7f7f8;
+    --bg-alt2: #eeeef1;
+    --border: #d9d9de;
+    --border-strong: #b6b6bd;
+    --text: #1a1a1f;
+    --text-dim: #5e5e6a;
+    --text-faint: #8a8a93;
+    --accent: #1f6feb;
+    --accent-bg: #e7f0ff;
+    --danger: #c0392b;
+    --success: #2e7d32;
+    --warning: #b76e00;
+    --selected-bg: #fff3c4;
+    --row-hover: #f1f5fb;
+    --header-bg: #f3f3f5;
+    --pill-bg: #eaf2ff;
+    --pill-border: #b6cdf6;
+    /* Pivot blue palette — darkest at outermost level, fades inward */
+    --pv-h0: #2e5fa3;      /* outermost col level header */
+    --pv-h1: #4a7abf;      /* second level */
+    --pv-h2: #6d99d0;      /* third level / label col */
+    --pv-h3: #93b3de;      /* general header bg / deep leaves */
+    --pv-border: #6d99d0;  /* blue border (frame lines only) */
+    --pv-sub-col: #dce6f3; /* col-subtotal cell bg */
+    --pv-sub-row: #edf1f8; /* row-subtotal cell bg */
+    --pv-grand: #b4c6e7;   /* grand total row/col */
+    --pv-grand-dark: #8faadc; /* grand total label */
+    --pv-data-border: #e2e8f0; /* interior data cell borders */
+  }
+  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
+  body { overflow: hidden; }
+  *, *::before, *::after { box-sizing: border-box; }
+  button { font: inherit; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  /* Top bar */
+  .topbar { height: 42px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 10px; gap: 8px; background: var(--bg-alt); font-size: 13px; flex-shrink: 0; }
+  .topbar .title { font-weight: 700; letter-spacing: -0.01em; font-size: 13px; white-space: nowrap; }
+  .topbar .badge { font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-dim); white-space: nowrap; }
+  .topbar-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+  .topbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  /* Topbar drop zone */
+  .tb-dropzone { border: 1.5px dashed var(--border-strong); border-radius: 4px; padding: 3px 10px; font-size: 12px; color: var(--text-dim); cursor: pointer; transition: all 120ms; background: var(--bg); white-space: nowrap; flex-shrink: 0; }
+  .tb-dropzone:hover, .tb-dropzone.dragover { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+  /* Topbar tables bar */
+  .tb-tables { display: flex; gap: 2px; align-items: center; overflow-x: auto; flex: 1; min-width: 0; }
+  .tb-tables::-webkit-scrollbar { height: 3px; }
+  .tb-table-item { display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; background: var(--bg); white-space: nowrap; color: var(--text-dim); flex-shrink: 0; }
+  .tb-table-item:hover { background: var(--bg-alt2); color: var(--text); }
+  .tb-table-item.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .tb-table-remove { margin-left: 2px; color: inherit; opacity: 0.5; padding: 0 2px; border-radius: 2px; cursor: pointer; font-size: 14px; }
+  .tb-table-remove:hover { opacity: 1; color: var(--danger); }
+  /* Mode tabs */
+  .mode-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg-alt); flex-shrink: 0; }
+  .mode-tab { padding: 7px 16px; cursor: pointer; border-right: 1px solid var(--border); font-size: 13px; color: var(--text-dim); background: transparent; border-top: 2px solid transparent; }
+  .mode-tab:hover { background: var(--bg); color: var(--text); }
+  .mode-tab.active { background: var(--bg); color: var(--text); border-top-color: var(--accent); font-weight: 500; }
+  /* Layout */
+  .app { display: flex; flex-direction: column; height: 100vh; max-height: 100vh; overflow: hidden; }
+  .main { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; }
+  .sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--bg-alt); overflow-y: auto; display: flex; flex-direction: column; transition: width 200ms ease; }
+  .sidebar.collapsed { width: 0; overflow: hidden; border-right: none; }
+  .content { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  /* Sidebar – schema fills the pane */
+  .sb-section { padding: 8px 10px; }
+  .schema-fill { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 8px 10px; overflow-y: auto; }
+  .schema-fill #schema-list { flex: 1; overflow-y: auto; }
+  .sb-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin-bottom: 6px; font-weight: 600; }
+  /* Dropzone (splash only) */
+  .dropzone { border: 1.5px dashed var(--border-strong); border-radius: 6px; padding: 16px 12px; text-align: center; color: var(--text-dim); font-size: 12px; cursor: pointer; transition: all 120ms; background: var(--bg); }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+  /* Grid */
+  .grid-wrap { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+  .pills-bar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; background: var(--bg-alt); min-height: 32px; align-items: center; flex-shrink: 0; }
+  .pills-bar:empty { display: none; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; background: var(--pill-bg); border: 1px solid var(--pill-border); border-radius: 12px; font-size: 12px; }
+  .pill .x { cursor: pointer; color: var(--text-dim); padding: 0 2px; }
+  .pill .x:hover { color: var(--danger); }
+  .grid-scroll { flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; position: relative; }
+  table.dgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  table.dgrid thead { position: sticky; top: 0; z-index: 5; }
+  table.dgrid th { background: var(--header-bg); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border-strong); padding: 0; text-align: left; font-weight: 500; user-select: none; position: relative; white-space: nowrap; vertical-align: top; }
+  table.dgrid th .th-inner { display: flex; align-items: center; padding: 6px 6px 6px 8px; gap: 4px; min-height: 26px; }
+  table.dgrid th .col-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
+  table.dgrid th .col-type { font-size: 10px; color: var(--text-faint); font-weight: normal; margin-left: 4px; font-family: ui-monospace, Menlo, monospace; }
+  table.dgrid th .sort-ind { color: var(--accent); font-weight: bold; font-size: 11px; }
+  table.dgrid th .funnel-btn { cursor: pointer; padding: 2px 4px; border-radius: 3px; color: var(--text-faint); }
+  table.dgrid th .funnel-btn:hover { background: var(--bg-alt2); color: var(--text); }
+  table.dgrid th .funnel-btn.active { color: var(--accent); }
+  table.dgrid th .resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; }
+  table.dgrid th .resize-handle:hover { background: var(--accent); }
+  table.dgrid td { padding: 4px 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+  table.dgrid tr:hover td { background: var(--row-hover); }
+  table.dgrid td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
+  table.dgrid td.null { color: var(--text-faint); font-style: italic; }
+  /* Status bar */
+  .statusbar { border-top: 1px solid var(--border); padding: 4px 10px; font-size: 11px; color: var(--text-dim); background: var(--bg-alt); display: flex; gap: 16px; align-items: center; height: 24px; flex-shrink: 0; }
+  .statusbar .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  /* Filter dialog */
+  .fdialog { position: fixed; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); z-index: 100; width: 320px; max-height: 480px; display: flex; flex-direction: column; }
+  .fdialog .top-actions { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .fdialog .top-actions button { flex: 1; padding: 6px; background: var(--bg-alt); border: none; border-right: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+  .fdialog .top-actions button:last-child { border-right: none; }
+  .fdialog .top-actions button:hover { background: var(--bg-alt2); }
+  .fdialog .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .fdialog .tab { flex: 1; padding: 6px 4px; font-size: 11px; cursor: pointer; text-align: center; color: var(--text-dim); border-bottom: 2px solid transparent; }
+  .fdialog .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--bg); }
+  .fdialog .tab:hover { background: var(--bg-alt); }
+  .fdialog .body { flex: 1; overflow-y: auto; padding: 8px; min-height: 200px; }
+  .fdialog input[type=text], .fdialog input[type=number], .fdialog select { width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; }
+  .fdialog .vlist { font-size: 12px; }
+  .fdialog .vlist-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
+  .fdialog .vlist-item:hover { background: var(--bg-alt); }
+  .fdialog .vlist-item input { margin: 0; }
+  .fdialog .vlist-item .count { margin-left: auto; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  .fdialog .vlist-item .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fdialog .vlist-item .val.null { font-style: italic; color: var(--text-faint); }
+  .fdialog .footer { padding: 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; justify-content: flex-end; }
+  .fdialog .footer button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; background: var(--bg); font-size: 12px; }
+  .fdialog .footer button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .fdialog .footer button.primary:hover { background: #1858c4; }
+  .fdialog .footer button:hover { background: var(--bg-alt); }
+  /* Pivot UI */
+  .pivot-mode { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+  .pivot-fields { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg-alt); min-height: 0; overflow-y: auto; transition: width 200ms ease; }
+  .sidebar.collapsed ~ .content .pivot-fields { width: 360px; }
+  .pivot-fields-h { padding: 8px 10px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 12px; flex-shrink: 0; }
+  .pivot-fields-list { padding: 6px; overflow-y: auto; flex: 0 1 auto; min-height: 60px; max-height: 220px; flex-shrink: 0; }
+  .pivot-field { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; cursor: grab; border-radius: 3px; user-select: none; overflow: hidden; }
+  .pivot-field:hover { background: var(--bg-alt2); }
+  .pivot-field input { margin: 0; flex-shrink: 0; }
+  .pivot-field span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pivot-tiles { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(2, minmax(100px, 1fr)); gap: 4px; padding: 6px; border-top: 1px solid var(--border); min-height: 260px; flex-shrink: 0; }
+  .pivot-tile { border: 1px solid var(--border); background: var(--bg); border-radius: 3px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .pivot-tile-h { padding: 4px 6px; font-size: 11px; font-weight: 600; color: var(--text-dim); display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); background: var(--bg-alt); flex-shrink: 0; white-space: nowrap; overflow: hidden; }
+  .pivot-tile-body { padding: 4px; flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 3px; }
+  .pivot-tile.dragover { background: var(--accent-bg); border-color: var(--accent); }
+  .pivot-chip { display: flex; align-items: center; gap: 4px; padding: 3px 6px; background: var(--pill-bg); border: 1px solid var(--pill-border); border-radius: 3px; font-size: 11px; cursor: grab; overflow: hidden; min-width: 0; position: relative; }
+  .pivot-chip.drag-over-before { border-top: 2px solid var(--accent); }
+  .pivot-chip.drag-over-after { border-bottom: 2px solid var(--accent); }
+  .pivot-chip .agg { font-family: ui-monospace, Menlo, monospace; color: var(--accent); font-size: 10px; padding: 0 2px; border: 1px solid var(--pill-border); border-radius: 2px; background: var(--bg); flex-shrink: 0; }
+  .pivot-chip .filter-btn { cursor: pointer; padding: 1px 2px; color: var(--text-faint); display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 2px; }
+  .pivot-chip .filter-btn:hover { background: var(--bg-alt2); color: var(--text); }
+  .pivot-chip .filter-btn.active { color: var(--accent); }
+  .pivot-chip .filter-btn .icon { width: 11px; height: 11px; }
+  .pivot-chip .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .pivot-content { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+  .pivot-toolbar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg-alt); align-items: center; font-size: 12px; flex-shrink: 0; }
+  .pivot-toolbar button { padding: 3px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 11px; }
+  .pivot-toolbar button:hover { background: var(--bg-alt2); }
+  /* Pivot grid */
+  table.pgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  table.pgrid thead { position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--pv-border); }
+  /* All header cells — no individual borders; the thead border-bottom provides the single clean divider */
+  table.pgrid th {
+    background: var(--pv-h3);
+    color: #fff;
+    border-right: none;
+    border-bottom: none;
+    padding: 5px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  /* Label/row-dim header (top-left sticky cell) — darkest, right frame border only */
+  table.pgrid th.label {
+    background: var(--pv-h0);
+    color: #fff;
+    font-weight: 700;
+    position: sticky;
+    left: 0;
+    z-index: 6;
+    border-right: 2px solid var(--pv-border);
+    border-bottom: none;
+  }
+  /* Data cells */
+  table.pgrid td {
+    padding: 4px 10px;
+    border-right: 1px solid var(--pv-data-border);
+    border-bottom: 1px solid var(--pv-data-border);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, Menlo, monospace;
+    text-align: right;
+  }
+  /* Row label cells (sticky left column) */
+  table.pgrid td.label {
+    background: #f5f8fc;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    text-align: left;
+    font-family: inherit;
+    font-weight: 500;
+    border-right: 2px solid var(--pv-border);
+  }
+  /* Row subtotals — soft blue-gray */
+  table.pgrid tr.subtotal td { background: var(--pv-sub-row); font-weight: 600; }
+  table.pgrid tr.subtotal td.label { background: #dce6f3; }
+  /* Grand total row */
+  table.pgrid tr.grandtotal td {
+    background: var(--pv-grand);
+    font-weight: 700;
+    border-top: 2px solid var(--pv-border);
+  }
+  table.pgrid tr.grandtotal td.label {
+    background: var(--pv-grand-dark);
+    color: #fff;
+    border-right: 2px solid var(--pv-border);
+  }
+  /* Report filter bar above pivot — matching pivot color scheme */
+  .pivot-report-filters {
+    padding: 8px 14px;
+    background: var(--pv-h3);
+    border-bottom: 2px solid var(--pv-border);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .pivot-report-filters .prf-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 12px;
+    color: #fff;
+  }
+  .pivot-report-filters .prf-label {
+    font-weight: 600;
+    min-width: 110px;
+    color: rgba(255,255,255,0.85);
+  }
+  .pivot-report-filters .prf-btn {
+    border: 1px solid rgba(255,255,255,0.5);
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 130px;
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    gap: 8px;
+    font-size: 12px;
+    transition: background 120ms;
+  }
+  .pivot-report-filters .prf-btn:hover { background: rgba(255,255,255,0.25); }
+  /* SQL console */
+  .sql-mode { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .sql-edit-wrap { border-bottom: 1px solid var(--border); min-height: 80px; max-height: 50%; display: flex; flex-direction: column; resize: vertical; overflow: hidden; }
+  .CodeMirror { height: 100%; font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .sql-toolbar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg-alt); align-items: center; font-size: 12px; }
+  .sql-toolbar button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 12px; }
+  .sql-toolbar button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .sql-toolbar button.primary:hover { background: #1858c4; }
+  .sql-error { color: var(--danger); padding: 6px 10px; background: #fdecea; border-bottom: 1px solid #f5c2c0; font-size: 12px; font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+  /* Misc */
+  .btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 12px; color: var(--text); }
+  .btn:hover { background: var(--bg-alt2); }
+  .btn-sm { padding: 2px 6px; font-size: 11px; }
+  .icon { width: 14px; height: 14px; display: inline-block; vertical-align: middle; flex-shrink: 0; pointer-events: none; }
+  .icon-wrap { display: inline-flex; align-items: center; pointer-events: none; }
+  .chev { cursor: pointer; display: inline-flex; align-items: center; width: 14px; color: var(--text-dim); }
+  .chev .icon { width: 12px; height: 12px; }
+  .chev:hover { color: var(--text); }
+  .pivot-chip .menu-btn .icon { width: 12px; height: 12px; }
+  table.dgrid th .funnel-btn .icon { width: 12px; height: 12px; }
+  .splash { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; flex: 1; padding: 32px; color: var(--text-dim); }
+  .splash .big-dropzone { width: 100%; max-width: 480px; padding: 48px 24px; font-size: 14px; }
+  .ctx-menu { position: fixed; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); z-index: 200; min-width: 160px; padding: 4px 0; font-size: 12px; }
+  .ctx-menu-item { padding: 5px 12px; cursor: pointer; }
+  .ctx-menu-item:hover { background: var(--accent-bg); }
+  .ctx-menu-sep { border-top: 1px solid var(--border); margin: 4px 0; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--bg-alt2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .agg-select { padding: 1px 2px; font-size: 10px; border: 1px solid var(--pill-border); border-radius: 2px; background: var(--bg); }
+  .toast { position: fixed; bottom: 32px; right: 16px; background: var(--text); color: white; padding: 10px 16px; border-radius: 4px; font-size: 12px; z-index: 300; opacity: 0; transition: opacity 200ms; pointer-events: none; max-width: 400px; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--danger); }
+</style>
+</head>
+<body>
+<div id="app" class="app">
+  <div class="topbar">
+    <span class="title">Parquet Explorer</span>
+    <span class="badge" id="duckdb-status">initializing…</span>
+    <div class="topbar-sep"></div>
+    <div class="tb-dropzone" id="tb-dropzone" title="Drop .parquet file or click to browse">
+      <span id="tb-drop-label">Drop .parquet or click</span>
+    </div>
+    <input type="file" id="file-input" accept=".parquet" multiple style="display:none">
+    <div class="topbar-sep"></div>
+    <div class="tb-tables" id="tb-tables"></div>
+    <div class="right">
+      <button class="btn btn-sm" id="sidebar-toggle" title="Toggle schema panel">◀ Schema</button>
+      <span class="badge" id="active-table-badge" style="display:none"></span>
+    </div>
+  </div>
+  <div class="main">
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-section schema-fill" id="schema-section" style="display:none">
+        <div class="sb-h">Schema</div>
+        <div id="schema-list" class="mono" style="font-size: 11px;"></div>
+      </div>
+    </aside>
+    <div class="content" id="content">
+      <!-- rendered here -->
+    </div>
+  </div>
+</div>
+<div id="dialog-root"></div>
+<div id="toast" class="toast"></div>
+
+<script type="module">
+import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm';
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  db: null, conn: null, tables: [], activeTable: null, mode: 'table',
+  filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
+  totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
+  pivot: {}, pivotData: null, pivotShape: null,
+  sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
+  sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
+};
+
+const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
+let _fdlgCloseHandler = null;
+
+const ICONS = {
+  funnel: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 9v6l-4 2v-8z"/></svg>',
+  funnelFilled: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M3 4h18l-7 9v6l-4 2v-8z"/></svg>',
+  chevDown: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+  chevRight: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>',
+  cols: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg>',
+  rows: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="4" x2="7" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="17" y1="4" x2="17" y2="14"/></svg>',
+  sigma: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 5 6 5 12 12 6 19 18 19"/></svg>',
+};
+function iconEl(html) { const s = document.createElement('span'); s.className='icon-wrap'; s.innerHTML = html; return s; }
+
+// DOM HELPERS
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') e.className = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
+    else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'html') e.innerHTML = v;
+    else if (v !== null && v !== undefined) e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    const isPrimitive = typeof c === 'string' || typeof c === 'number' || typeof c === 'boolean';
+    e.appendChild(isPrimitive ? document.createTextNode(String(c)) : c);
+  }
+  return e;
+}
+
+const safeJoin = (arr) => arr.map(v => (v === null || v === undefined) ? '__NULL__' : String(v)).join('|');
+
+function toast(msg, isError = false) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.toggle('error', isError); t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+// SQL ESCAPING
+function qid(name) { return '"' + String(name).replace(/"/g, '""') + '"'; }
+function qlit(v) {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'number' || typeof v === 'bigint') return String(v);
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (v instanceof Date) return "TIMESTAMP '" + v.toISOString().replace('T',' ').replace('Z','') + "'";
+  return "'" + String(v).replace(/'/g, "''") + "'";
+}
+
+// FILTER SERIALIZATION HELPERS
+// Sets aren't JSON-serializable — convert to/from Array when passing filters through drag-data.
+function serializeFilter(f) {
+  if (!f) return null;
+  if (f.type === 'values' && f.included instanceof Set) return { ...f, included: [...f.included] };
+  return f;
+}
+function deserializeFilter(f) {
+  if (!f) return null;
+  if (f.type === 'values' && Array.isArray(f.included)) return { ...f, included: new Set(f.included) };
+  return f;
+}
+
+// DUCKDB INIT
+async function initDuckDB() {
+  const bundles = duckdb.getJsDelivrBundles();
+  const bundle = await duckdb.selectBundle(bundles);
+  const worker_url = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
+  const worker = new Worker(worker_url);
+  const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
+  const db = new duckdb.AsyncDuckDB(logger, worker);
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  URL.revokeObjectURL(worker_url);
+  state.db = db; state.conn = await db.connect();
+  $('#duckdb-status').textContent = 'duckdb ready';
+}
+
+async function runQuery(sql) {
+  const t0 = performance.now();
+  let result;
+  try { result = await state.conn.query(sql); } catch (e) { throw new Error(String(e.message || e)); }
+  const ms = performance.now() - t0;
+  const cols = result.schema.fields.map(f => ({ name: f.name, type: String(f.type), kind: classifyType(String(f.type)) }));
+  const raw = result.toArray();
+  const rows = new Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    const obj = raw[i].toJSON();
+    for (const k in obj) {
+      const v = obj[k];
+      if (typeof v === 'bigint') obj[k] = (v >= -9007199254740992n && v <= 9007199254740992n) ? Number(v) : v.toString();
+    }
+    rows[i] = obj;
+  }
+  state.lastQueryMs = ms;
+  return { rows, columns: cols, ms };
+}
+function classifyType(t) {
+  const u = t.toUpperCase();
+  if (/INT|DECIMAL|DOUBLE|FLOAT|REAL|HUGEINT|NUMERIC|NUMBER/.test(u)) return 'num';
+  if (/DATE|TIME|TIMESTAMP/.test(u)) return 'date';
+  if (/BOOL/.test(u)) return 'bool';
+  return 'text';
+}
+
+// LOAD PARQUET
+async function loadFiles(fileList) {
+  for (const file of fileList) {
+    if (!file.name.toLowerCase().endsWith('.parquet')) continue;
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const regName = file.name;
+      try { await state.db.dropFile(regName); } catch (_) {}
+      await state.db.registerFileBuffer(regName, buf);
+      const tableName = sanitizeTableName(file.name, state.tables.map(t => t.name));
+      await state.conn.query(`CREATE OR REPLACE VIEW ${qid(tableName)} AS SELECT * FROM read_parquet(${qlit(regName)})`);
+      const schemaRes = await runQuery(`DESCRIBE ${qid(tableName)}`);
+      const schema = schemaRes.rows.map(r => ({ name: r.column_name, type: r.column_type, kind: classifyType(r.column_type) }));
+      const cRes = await runQuery(`SELECT COUNT(*) AS c FROM ${qid(tableName)}`);
+      state.tables.push({ name: tableName, file: regName, schema, rowCount: Number(cRes.rows[0].c) });
+      state.filters[tableName] = {}; state.sorts[tableName] = null; state.hidden[tableName] = new Set(); state.colWidths[tableName] = {};
+      state.pivot[tableName] = newPivotState();
+      if (!state.activeTable) state.activeTable = tableName;
+    } catch (e) { toast(`Failed to load ${file.name}: ${e.message}`, true); }
+  }
+  renderAll();
+  if (state.activeTable) refreshActiveView();
+}
+function sanitizeTableName(filename, existing) {
+  let base = filename.replace(/\.parquet$/i, '').replace(/[^A-Za-z0-9_]/g, '_');
+  if (!base || /^\d/.test(base)) base = 't_' + base;
+  let n = base, i = 1; while (existing.includes(n)) n = base + '_' + (++i); return n;
+}
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top' }; }
+
+// FILTER -> SQL
+function buildWhere(table, filters) {
+  const clauses = [];
+  for (const [col, f] of Object.entries(filters || {})) {
+    if (!f) continue;
+    const c = qid(col);
+    if (f.type === 'values') {
+      if (!f.included && f.includeBlank) continue;
+      const vals = f.included ? [...f.included] : [];
+      const parts = [];
+      if (vals.length > 0) parts.push(`${c} IN (${vals.map(v => qlit(v)).join(',')})`);
+      if (f.includeBlank) parts.push(`${c} IS NULL`);
+      clauses.push(parts.length === 0 ? 'FALSE' : '(' + parts.join(' OR ') + ')');
+    } else if (f.type === 'num') {
+      if (f.op === 'between') clauses.push(`${c} BETWEEN ${qlit(+f.a)} AND ${qlit(+f.b)}`);
+      else if (['>','<','=','>=','<=','!='].includes(f.op)) clauses.push(`${c} ${f.op} ${qlit(+f.a)}`);
+    } else if (f.type === 'text') {
+      const a = String(f.a ?? '');
+      let textClause = null;
+      if (f.op === 'contains') textClause = `${c}::VARCHAR ILIKE ${qlit('%'+a+'%')}`;
+      else if (f.op === 'begins') textClause = `${c}::VARCHAR ILIKE ${qlit(a+'%')}`;
+      else if (f.op === 'ends') textClause = `${c}::VARCHAR ILIKE ${qlit('%'+a)}`;
+      else if (f.op === 'eq') textClause = `${c} = ${qlit(a)}`;
+      else if (f.op === 'regex') textClause = `regexp_matches(${c}::VARCHAR, ${qlit(a)})`;
+      if (textClause) clauses.push(f.not ? `NOT (${textClause})` : textClause);
+    } else if (f.type === 'date') {
+      const lit = (s) => `CAST(${qlit(s)} AS TIMESTAMP)`;
+      if (f.op === 'between') clauses.push(`${c} BETWEEN ${lit(f.a)} AND ${lit(f.b)}`);
+      else if (['>','<','=','>=','<=','!='].includes(f.op)) clauses.push(`${c} ${f.op} ${lit(f.a)}`);
+    }
+  }
+  return clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
+}
+
+// TABLE VIEW: refresh
+async function refreshTableView() {
+  if (!state.activeTable) return;
+  const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
+  const filters = state.filters[tn] || {}, sort = state.sorts[tn];
+  const where = buildWhere(table, filters);
+  let topN = '';
+  for (const [col, f] of Object.entries(filters)) if (f && f.type === 'num' && f.op === 'topN') topN = `ORDER BY ${qid(col)} DESC LIMIT ${parseInt(f.a)||10}`;
+  
+  state.totalRows = table.rowCount;
+  try {
+    const cRes = await runQuery(topN ? `SELECT COUNT(*) AS c FROM (SELECT * FROM ${qid(tn)} ${where} ${topN}) sub` : `SELECT COUNT(*) AS c FROM ${qid(tn)} ${where}`);
+    state.filteredRows = Number(cRes.rows[0].c);
+  } catch (e) { toast('Filter error: ' + e.message, true); return; }
+  
+  const maxPage = Math.max(0, Math.ceil(state.filteredRows / state.pageSize) - 1);
+  if (state.page > maxPage) state.page = maxPage;
+  const offset = state.page * state.pageSize;
+  const orderClause = sort ? `ORDER BY ${qid(sort.col)} ${sort.dir.toUpperCase()}` : '';
+  const colSel = table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ');
+  
+  try {
+    const q = topN ? `SELECT ${colSel} FROM (SELECT * FROM ${qid(tn)} ${where} ${topN}) sub ${orderClause} LIMIT ${state.pageSize} OFFSET ${offset}` : `SELECT ${colSel} FROM ${qid(tn)} ${where} ${orderClause} LIMIT ${state.pageSize} OFFSET ${offset}`;
+    const res = await runQuery(q);
+    state.rows = res.rows;
+    renderContent();
+  } catch (e) { toast('Query error: ' + e.message, true); }
+}
+
+async function refreshActiveView() {
+  if (state.mode === 'table') return refreshTableView();
+  if (state.mode === 'pivot') return refreshPivotView();
+}
+
+// RENDER HELPERS
+function renderAll() {
+  const root = $('#tb-tables'); root.innerHTML = '';
+  if (state.tables.length === 0) { root.appendChild(el('span', { style:'font-size:11px; color:var(--text-faint);' }, 'No tables loaded')); }
+  for (const t of state.tables) {
+    root.appendChild(el('div', { class: 'tb-table-item' + (t.name === state.activeTable ? ' active' : ''), onclick: () => { state.activeTable = t.name; renderAll(); refreshActiveView(); } },
+      el('span', { style:'max-width:140px; overflow:hidden; text-overflow:ellipsis;', title: t.name }, t.name),
+      el('span', { class:'tb-table-remove', onclick: (e) => { e.stopPropagation(); dropTable(t.name); } }, '×')
+    ));
+  }
+  
+  const sb = $('#schema-section'), list = $('#schema-list'); list.innerHTML = '';
+  if (!state.activeTable) { sb.style.display = 'none'; } else {
+    sb.style.display = '';
+    const t = state.tables.find(x => x.name === state.activeTable);
+    for (const c of t.schema) {
+      list.appendChild(el('div', { style: 'display:flex; gap:6px; padding:2px 0; align-items:center;' },
+        el('input', { type:'checkbox', checked: !state.hidden[t.name].has(c.name) ? '' : null, onchange: (e) => { e.target.checked ? state.hidden[t.name].delete(c.name) : state.hidden[t.name].add(c.name); if (state.mode === 'table') refreshTableView(); } }),
+        el('span', { style:'flex:1; overflow:hidden; text-overflow:ellipsis;' }, c.name), el('span', { style:'color:var(--text-faint); font-size:10px;' }, c.type)
+      ));
+    }
+  }
+  renderContent();
+}
+
+async function dropTable(name) {
+  const idx = state.tables.findIndex(t => t.name === name); if (idx === -1) return;
+  const t = state.tables[idx];
+  try { await state.conn.query(`DROP VIEW IF EXISTS ${qid(name)}`); await state.db.dropFile(t.file); } catch (_) {}
+  delete state.filters[name]; delete state.sorts[name]; delete state.hidden[name]; delete state.colWidths[name]; delete state.pivot[name];
+  for (const k of [...state.distinctCache.keys()]) if (k.startsWith(name + '::')) state.distinctCache.delete(k);
+  state.tables.splice(idx, 1);
+  if (state.activeTable === name) { state.activeTable = state.tables[0]?.name || null; state.page = 0; state.rows = []; state.pivotShape = null; state.sqlResult = null; }
+  renderAll(); if (state.activeTable) refreshActiveView();
+}
+
+function renderContent() {
+  const root = $('#content'); root.innerHTML = '';
+  if (!state.activeTable) {
+    const d = el('div', { class: 'dropzone big-dropzone', ondragover: (e) => { e.preventDefault(); d.classList.add('dragover'); }, ondragleave: () => d.classList.remove('dragover'), ondrop: (e) => { e.preventDefault(); d.classList.remove('dragover'); if (e.dataTransfer.files?.length) loadFiles(e.dataTransfer.files); }, onclick: () => $('#file-input').click() }, 'Drop .parquet here or click to pick');
+    root.appendChild(el('div', { class: 'splash' }, el('div', { style:'font-size:18px; font-weight:600; color:var(--text);' }, 'Parquet Explorer'), el('div', null, 'Drop a .parquet file to begin.'), d));
+    return;
+  }
+  root.appendChild(el('div', { class: 'mode-tabs' },
+    el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, 'Table'),
+    el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, 'Pivot'),
+    el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, 'SQL')
+  ));
+  if (state.mode === 'table') root.appendChild(renderTableMode());
+  else if (state.mode === 'pivot') root.appendChild(renderPivotMode());
+  else if (state.mode === 'sql') root.appendChild(renderSQLMode());
+}
+
+function switchMode(m) {
+  state.mode = m;
+  const sidebar = $('#sidebar'), toggleBtn = $('#sidebar-toggle');
+  if (m === 'pivot') { sidebar.classList.add('collapsed'); toggleBtn.textContent = '▶ Schema'; }
+  else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = '◀ Schema'; }
+  renderContent();
+  if (m === 'table') refreshTableView(); if (m === 'pivot') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
+}
+
+// ============================================================
+// TABLE MODE
+// ============================================================
+function renderTableMode() {
+  const wrap = el('div', { class: 'grid-wrap' }), tn = state.activeTable, table = state.tables.find(t => t.name === tn), filters = state.filters[tn] || {}, sort = state.sorts[tn], pills = el('div', { class: 'pills-bar' });
+  if (sort) pills.appendChild(el('span', { class:'pill' }, `Sort: ${sort.col} ${sort.dir==='asc'?'↑':'↓'}`, el('span', { class:'x', onclick: () => { state.sorts[tn] = null; refreshTableView(); } }, '×')));
+  for (const [col, f] of Object.entries(filters)) if (f) pills.appendChild(el('span', { class:'pill' }, `${col}: ${filterSummary(f)}`, el('span', { class:'x', onclick: () => { delete filters[col]; state.page = 0; refreshTableView(); } }, '×')));
+  wrap.appendChild(pills);
+  
+  const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid' }), visCols = table.schema.filter(c => !state.hidden[tn].has(c.name)), trHead = el('tr');
+  for (const c of visCols) {
+    const isSorted = sort && sort.col === c.name, hasFilter = !!filters[c.name], widthPx = state.colWidths[tn][c.name];
+    const th = el('th', { style: widthPx ? `width:${widthPx}px; min-width:${widthPx}px;` : null },
+      el('div', { class: 'th-inner' },
+        el('div', { class: 'col-name', onclick: () => toggleSort(c.name), title: c.name }, c.name, el('span', { class: 'col-type' }, kindLabel(c.kind))),
+        isSorted ? el('span', { class: 'sort-ind' }, sort.dir==='asc'?'▲':'▼') : null,
+        el('span', { class: 'funnel-btn' + (hasFilter?' active':''), onclick: (e) => { e.stopPropagation(); openFilterDialog(c, e.currentTarget); }, html: hasFilter ? ICONS.funnelFilled : ICONS.funnel })
+      ),
+      (() => { const rh = el('div', { class: 'resize-handle' }); rh.addEventListener('mousedown', (e) => startResize(e, th, c.name, tn)); return rh; })()
+    );
+    trHead.appendChild(th);
+  }
+  grid.appendChild(el('thead', null, trHead));
+  const tbody = el('tbody');
+  if (state.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: visCols.length, style:'text-align:center; padding:20px; color:var(--text-faint);' }, 'No rows.')));
+  else {
+    for (const r of state.rows) {
+      const tr = el('tr');
+      for (const c of visCols) { const v = r[c.name], isNull = v === null || v === undefined; tr.appendChild(el('td', { class: (isNull?'null ':'') + (c.kind==='num'?'num':'') }, isNull ? 'NULL' : fmtCell(v, c.kind))); }
+      tbody.appendChild(tr);
+    }
+  }
+  grid.appendChild(tbody); gridScroll.appendChild(grid); wrap.appendChild(gridScroll);
+  
+  const pageCount = Math.max(1, Math.ceil(state.filteredRows / state.pageSize));
+  const pageBtn = (label, onclick, disabled) => el('button', { class:'btn btn-sm', onclick, disabled: disabled?'':null, style: disabled?'opacity:0.4; cursor:not-allowed;':'' }, label);
+  wrap.appendChild(el('div', { class: 'statusbar' },
+    el('span', null, `${state.filteredRows.toLocaleString()} / ${state.totalRows.toLocaleString()} rows`),
+    state.filteredRows !== state.totalRows ? el('span', { style:'color:var(--accent);' }, `(filtered)`) : null,
+    el('span', { style:'margin-left:auto; display:flex; gap:8px; align-items:center;' },
+      pageBtn('« First', () => { state.page = 0; refreshTableView(); }, state.page === 0),
+      pageBtn('‹ Prev', () => { state.page--; refreshTableView(); }, state.page === 0),
+      el('span', null, `Page ${state.page+1} / ${pageCount}`),
+      pageBtn('Next ›', () => { state.page++; refreshTableView(); }, state.page >= pageCount-1),
+      pageBtn('Last »', () => { state.page = pageCount-1; refreshTableView(); }, state.page >= pageCount-1),
+      el('span', { style:'border-left:1px solid var(--border); padding-left:8px;' }, `${state.lastQueryMs.toFixed(0)} ms`),
+      el('button', { class:'btn btn-sm', onclick: () => openExportMenu('table') }, 'Export ⌄')
+    )
+  ));
+  return wrap;
+}
+
+function filterSummary(f) {
+  if (f.type === 'values') return f.included ? `${f.included.size} value(s)` + (f.includeBlank?' +blanks':'') : (f.includeBlank?'blanks only':'none');
+  if (f.type === 'num' || f.type === 'date') return f.op === 'between' ? `${f.a}..${f.b}` : (f.op === 'topN' ? `top ${f.a}` : `${f.op} ${f.a}`);
+  return `${f.not ? 'NOT ' : ''}${f.op}: ${f.a}`;
+}
+function kindLabel(k) { return k === 'num' ? '#' : (k === 'date' ? '📅' : (k === 'bool' ? '✓' : 'A')); }
+function fmtCell(v, kind) {
+  if (v === null || v === undefined) return '';
+  if (kind === 'date') return v instanceof Date ? v.toISOString().replace('T',' ').replace(/\.\d+Z?$/, '') : String(v);
+  if (kind === 'num') return typeof v === 'number' ? (Number.isInteger(v) ? NUM_FMT_INT.format(v) : NUM_FMT_CELL.format(v)) : String(v);
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+function toggleSort(col) {
+  const s = state.sorts[state.activeTable];
+  if (!s || s.col !== col) state.sorts[state.activeTable] = { col, dir: 'asc' };
+  else if (s.dir === 'asc') state.sorts[state.activeTable] = { col, dir: 'desc' };
+  else state.sorts[state.activeTable] = null;
+  refreshTableView();
+}
+function startResize(e, th, colName, tableName) {
+  e.preventDefault(); const startX = e.clientX, startWidth = th.getBoundingClientRect().width;
+  const onMove = (mv) => { const w = Math.max(40, startWidth + mv.clientX - startX); state.colWidths[tableName][colName] = Math.round(w); th.style.width = w + 'px'; th.style.minWidth = w + 'px'; };
+  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+}
+
+// FILTER DIALOG
+async function openFilterDialog(colDef, anchor) {
+  const tn = state.activeTable, existing = (state.filters[tn] || {})[colDef.name] || null;
+  // Maintain separate adv state per filter type so num values don't bleed into the text tab.
+  const makeAdv = (type) => ({
+    num:  existing?.type === 'num'  ? { ...existing } : { type:'num',  op:'>',        a:'', b:'' },
+    date: existing?.type === 'date' ? { ...existing } : { type:'date', op:'>',        a:'', b:'' },
+    text: existing?.type === 'text' ? { ...existing } : { type:'text', op:'contains', a:'', b:'', not: false },
+  }[type] ?? { type:'text', op:'contains', a:'', b:'', not: false });
+  state.fdlg = {
+    col: colDef,
+    tab: existing && existing.type !== 'values' ? existing.type : 'values',
+    search: '',
+    values: null, valuesTotal: 0, valuesLoaded: 0, pageStep: 500,
+    selected: existing?.type === 'values' && existing.included ? new Set(existing.included) : null,
+    includeBlank: existing?.type === 'values' ? existing.includeBlank !== false : true,
+    selectAll: !existing || existing.type !== 'values' || !existing.included,
+    advNum:  makeAdv('num'),
+    advDate: makeAdv('date'),
+    advText: makeAdv('text'),
+    valuesError: null,
+  };
+  renderFilterDialog(anchor);
+  await loadDistinctValues(colDef);
+  // After loading values, if a non-values filter is active compute which items pass it
+  // so the Values tab reflects the actual filter state.
+  if (existing && existing.type !== 'values') {
+    state.fdlg.filteredValues = await computePassingValues(colDef, existing);
+    state.fdlg.selectAll = false;
+    state.fdlg.selected = new Set(state.fdlg.filteredValues);
+  }
+  renderFilterDialog(anchor);
+}
+
+// Returns a Set of distinct values that pass the given num/text/date filter
+async function computePassingValues(colDef, filter) {
+  const tn = state.activeTable;
+  try {
+    // buildWhere returns "WHERE ..." or ""; we need to append IS NOT NULL as an AND condition.
+    const baseWhere = buildWhere(null, { [colDef.name]: filter });
+    const notNull = `${qid(colDef.name)} IS NOT NULL`;
+    const sql = baseWhere
+      ? `SELECT DISTINCT ${qid(colDef.name)} AS v FROM ${qid(tn)} ${baseWhere} AND ${notNull} LIMIT 5000`
+      : `SELECT DISTINCT ${qid(colDef.name)} AS v FROM ${qid(tn)} WHERE ${notNull} LIMIT 5000`;
+    const res = await runQuery(sql);
+    return new Set(res.rows.map(r => r.v));
+  } catch (e) {
+    console.warn('computePassingValues failed:', e.message);
+    return new Set();
+  }
+}
+
+async function loadDistinctValues(colDef, more = false) {
+  const tn = state.activeTable, cacheKey = `${tn}::${colDef.name}`;
+  let cache = state.distinctCache.get(cacheKey);
+  if (!cache) {
+    const tcRes = await runQuery(`SELECT COUNT(DISTINCT ${qid(colDef.name)}) AS c, COUNT(*) FILTER (WHERE ${qid(colDef.name)} IS NULL) AS nulls FROM ${qid(tn)}`);
+    cache = { values: [], total: Number(tcRes.rows[0].c), nullCount: Number(tcRes.rows[0].nulls), loadedSoFar: 0 };
+    state.distinctCache.set(cacheKey, cache);
+  }
+  if (!more && cache.loadedSoFar > 0) { Object.assign(state.fdlg, { values: cache.values, valuesTotal: cache.total, valuesLoaded: cache.loadedSoFar, hasNulls: cache.nullCount > 0, nullCount: cache.nullCount }); return; }
+  const res = await runQuery(`SELECT ${qid(colDef.name)} AS v, COUNT(*) AS c FROM ${qid(tn)} WHERE ${qid(colDef.name)} IS NOT NULL GROUP BY 1 ORDER BY 1 ASC LIMIT ${state.fdlg.pageStep} OFFSET ${cache.loadedSoFar}`);
+  for (const r of res.rows) cache.values.push({ value: r.v, count: Number(r.c) });
+  cache.loadedSoFar += res.rows.length;
+  Object.assign(state.fdlg, { values: cache.values, valuesTotal: cache.total, valuesLoaded: cache.loadedSoFar, hasNulls: cache.nullCount > 0, nullCount: cache.nullCount });
+}
+
+function renderFilterDialog(anchor) {
+  $('#dialog-root').innerHTML = ''; const fdlg = state.fdlg; if (!fdlg) return;
+  const dlg = el('div', { class: 'fdialog' });
+  dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); } }, '▲ Sort A→Z'), el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); } }, '▼ Sort Z→A'), el('button', { onclick: () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); } }, '✕ Clear')));
+  
+  const kind = fdlg.col.kind, tabsArr = [['values','Values']];
+  if (kind === 'num') tabsArr.push(['num','Number']); else if (kind === 'date') tabsArr.push(['date','Date']); else tabsArr.push(['text','Text']);
+  if (kind !== 'text' && !tabsArr.find(t => t[0] === 'text')) tabsArr.push(['text','Text']);
+  dlg.appendChild(el('div', { class: 'tabs' }, ...tabsArr.map(([k, label]) => el('div', { class: 'tab' + (fdlg.tab === k ? ' active' : ''), onclick: () => { fdlg.tab = k; renderFilterDialog(anchor); } }, label))));
+  
+  const body = el('div', { class: 'body' });
+  if (fdlg.tab === 'values') {
+    // Show a note if a non-values filter is active so the user understands the Values tab
+    // shows all items checked (unconstrained) while the actual active filter is num/text/date.
+    const existingNonValues = fdlg.isPivotFilter
+      ? (fdlg.isPivotFilter.filter && fdlg.isPivotFilter.filter.type !== 'values' ? fdlg.isPivotFilter.filter : null)
+      : (state.filters[state.activeTable]?.[fdlg.col.name]?.type !== 'values' ? state.filters[state.activeTable]?.[fdlg.col.name] : null);
+    if (existingNonValues) {
+      body.appendChild(el('div', { style:'padding:6px 8px; margin-bottom:6px; background:#edf4ff; border:1px solid #b6cdf6; border-radius:3px; font-size:11px; color:#1f6feb;' },
+        `Active ${existingNonValues.type} filter: ${filterSummary(existingNonValues)}. Only matching values are pre-selected below.`));
+    }
+    body.appendChild(el('input', { type:'text', placeholder:'Search values…', oninput: (e) => { fdlg.search = e.target.value; renderValuesList(listWrap); } }));
+    var listWrap = el('div', { style:'margin-top:6px;' });
+    body.appendChild(listWrap); renderValuesList(listWrap);
+    if (fdlg.values && fdlg.valuesLoaded < fdlg.valuesTotal) {
+      body.appendChild(el('button', { class:'btn btn-sm', style:'margin-top:6px; width:100%;', onclick: async (e) => { e.target.disabled = true; e.target.textContent = 'Loading…'; await loadDistinctValues(fdlg.col, true); renderValuesList(listWrap); e.target.disabled = false; e.target.textContent = fdlg.valuesLoaded < fdlg.valuesTotal ? `Load more (${fdlg.valuesLoaded} / ${fdlg.valuesTotal} loaded)` : 'All loaded'; if (fdlg.valuesLoaded >= fdlg.valuesTotal) e.target.disabled = true; } }, `Load more (${fdlg.valuesLoaded||0} / ${fdlg.valuesTotal||0} loaded)`));
+    }
+  } else {
+    // Each tab type has its own independent adv state so values don't bleed across tabs.
+    const adv = fdlg.tab === 'num' ? fdlg.advNum : (fdlg.tab === 'date' ? fdlg.advDate : fdlg.advText);
+    adv.type = fdlg.tab;
+    const wrap = el('div', { style:'display:flex; flex-direction:column; gap:8px;' });
+    if (fdlg.tab === 'num') {
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>','>'],['>=','≥'],['<','<'],['<=','≤'],['=','='],['!=','≠'],['between','between'],['topN','top N']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('input', { type:'number', placeholder: adv.op === 'topN' ? 'N (e.g. 10)' : 'value', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
+      if (adv.op === 'between') wrap.appendChild(el('input', { type:'number', placeholder:'upper bound', value: adv.b ?? '', oninput: (e) => adv.b = e.target.value }));
+    } else if (fdlg.tab === 'date') {
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; body.innerHTML=''; body.appendChild(wrap); } }, ...[['>','after'],['>=','on or after'],['<','before'],['<=','on or before'],['=','equals'],['between','between']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('input', { type:'date', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
+      if (adv.op === 'between') wrap.appendChild(el('input', { type:'date', value: adv.b ?? '', oninput: (e) => adv.b = e.target.value }));
+    } else {
+      wrap.appendChild(el('select', { onchange: (e) => { adv.op = e.target.value; } }, ...[['contains','contains'],['begins','begins with'],['ends','ends with'],['eq','equals'],['regex','regex']].map(([v,l]) => el('option', { value:v, selected: adv.op === v ? '' : null }, l))));
+      wrap.appendChild(el('input', { type:'text', placeholder:'value', value: adv.a ?? '', oninput: (e) => adv.a = e.target.value }));
+      wrap.appendChild(el('label', { style:'display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12px; cursor:pointer; user-select:none;' }, el('input', { type:'checkbox', checked: adv.not ? '' : null, onchange: (e) => { adv.not = e.target.checked; } }), 'Exclude (NOT)'));
+    }
+    body.appendChild(wrap);
+  }
+  dlg.appendChild(body);
+  dlg.appendChild(el('div', { class: 'footer' }, el('button', { onclick: () => closeDialog() }, 'Cancel'), el('button', { class:'primary', onclick: () => applyFilterDialog() }, 'OK')));
+  $('#dialog-root').appendChild(dlg);
+  const rect = anchor.getBoundingClientRect(); dlg.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px'; dlg.style.top = Math.min(window.innerHeight - 500, rect.bottom + 4) + 'px';
+  if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler);
+  _fdlgCloseHandler = (e) => { const live = document.querySelector('#dialog-root .fdialog'); if (!live || !live.contains(e.target)) closeDialog(); };
+  setTimeout(() => document.addEventListener('mousedown', _fdlgCloseHandler), 0);
+}
+
+function renderValuesList(container) {
+  const fdlg = state.fdlg;
+  // Preserve scroll position of the inner list so checkbox clicks don't jump to top
+  const savedScroll = container.querySelector('.vlist')?.scrollTop ?? 0;
+  container.innerHTML = '';
+  if (!fdlg.values) { container.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, 'Loading…')); return; }
+  const search = (fdlg.search || '').toLowerCase();
+  const items = fdlg.values.filter(v => !search || String(v.value).toLowerCase().includes(search));
+
+  // ── Select All row (label and behaviour depend on whether a search is active) ──
+  const isSearching = !!search;
+  const selectAllLabel = isSearching ? '(Select All Search Results)' : '(Select All)';
+  const selectAllChecked = isSearching
+    ? items.length > 0 && items.every(it => fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value)))
+    : !!fdlg.selectAll;
+  const countBadge = isSearching
+    ? `${items.length} match${items.length !== 1 ? 'es' : ''}`
+    : (fdlg.valuesTotal ? `${fdlg.valuesTotal} unique` : '');
+
+  container.appendChild(el('div', { style:'border-bottom:1px solid var(--border); padding-bottom:4px; margin-bottom:2px;' },
+    el('label', { class:'vlist-item' },
+      el('input', { type:'checkbox', checked: selectAllChecked ? '' : null, onchange: (e) => {
+        if (isSearching) {
+          // Toggle only the visible (search-matching) items
+          fdlg.selectAll = false;
+          if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+          for (const it of items) { if (e.target.checked) fdlg.selected.add(it.value); else fdlg.selected.delete(it.value); }
+        } else {
+          fdlg.selectAll = e.target.checked;
+          fdlg.selected = fdlg.selectAll ? null : new Set();
+          fdlg.includeBlank = fdlg.selectAll ? true : false;
+        }
+        renderValuesList(container);
+      }}),
+      el('span', { class:'val', style:'font-weight:600;' }, selectAllLabel),
+      el('span', { class:'count' }, countBadge)
+    )
+  ));
+
+  // ── "Add Current Selection to Filter" — only visible during an active search ──
+  if (isSearching) {
+    container.appendChild(el('button', {
+      class: 'btn btn-sm',
+      style: 'width:100%; margin-bottom:6px; font-size:11px; text-align:left; color:var(--accent); border-color:var(--accent);',
+      title: 'Merge the checked search results into the filter, then clear the search so you can add more',
+      onclick: () => {
+        // Ensure we have an explicit selected Set (not the implicit "all" null)
+        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        // Union in every visible item that is currently checked
+        for (const it of items) {
+          if (fdlg.selectAll || fdlg.selected.has(it.value)) fdlg.selected.add(it.value);
+        }
+        fdlg.selectAll = false;
+        // Clear search state and update the search input DOM element
+        fdlg.search = '';
+        const inp = container.closest('.body')?.querySelector('input[placeholder="Search values…"]');
+        if (inp) inp.value = '';
+        renderValuesList(container);
+      }
+    }, '+ Add Current Selection to Filter'));
+  }
+
+  // ── Individual value rows ──
+  const scroll = el('div', { class:'vlist', style:'max-height:220px; overflow-y:auto;' });
+  for (const it of items) {
+    const checked = fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value));
+    scroll.appendChild(el('label', { class:'vlist-item' },
+      el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => {
+        fdlg.selectAll = false;
+        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        if (e.target.checked) fdlg.selected.add(it.value); else fdlg.selected.delete(it.value);
+        renderValuesList(container);
+      }}),
+      el('span', { class:'val' }, String(it.value)),
+      el('span', { class:'count' }, it.count.toLocaleString())
+    ));
+  }
+  if (items.length === 0 && !fdlg.hasNulls) scroll.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, 'No matches.'));
+  if (fdlg.hasNulls && (!search || '(blanks)'.includes(search) || '(null)'.includes(search))) {
+    scroll.appendChild(el('div', { style:'border-top:1px solid var(--border); margin-top:4px; padding-top:4px;' },
+      el('label', { class:'vlist-item' },
+        el('input', { type:'checkbox', checked: fdlg.includeBlank ? '' : null, onchange: (e) => {
+          fdlg.includeBlank = e.target.checked;
+          fdlg.selectAll = false;
+          if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+          renderValuesList(container);
+        }}),
+        el('span', { class:'val null' }, '(Blanks / NULL)'),
+        el('span', { class:'count' }, (fdlg.nullCount||0).toLocaleString())
+      )
+    ));
+  }
+  container.appendChild(scroll);
+  if (savedScroll) scroll.scrollTop = savedScroll;
+}
+
+function applyFilterDialog() {
+  const fdlg = state.fdlg; if (!fdlg) return;
+  const tn = state.activeTable, col = fdlg.col.name;
+  let finalFilter = null;
+  if (fdlg.tab === 'values') {
+    const search = (fdlg.search || '').toLowerCase();
+    if (search) {
+      // Excel-like: OK only applies to the visible (search-matching) items.
+      // Items not matching the search are excluded regardless of their check state.
+      const visibleVals = fdlg.values ? fdlg.values.filter(v => String(v.value).toLowerCase().includes(search)) : [];
+      const included = new Set(
+        visibleVals
+          .filter(v => fdlg.selectAll || (fdlg.selected && fdlg.selected.has(v.value)))
+          .map(v => v.value)
+      );
+      const incBlank = fdlg.includeBlank && ('(blanks)'.includes(search) || '(null)'.includes(search));
+      finalFilter = { type: 'values', included, includeBlank: incBlank };
+    } else {
+      if (!(fdlg.selectAll && fdlg.includeBlank)) finalFilter = { type: 'values', included: fdlg.selectAll ? null : fdlg.selected, includeBlank: fdlg.includeBlank };
+    }
+  } else {
+    const adv = fdlg.tab === 'num' ? fdlg.advNum : (fdlg.tab === 'date' ? fdlg.advDate : fdlg.advText);
+    if (adv.a !== '' && adv.a !== null && adv.a !== undefined) finalFilter = { type: adv.type, op: adv.op, a: adv.a, b: adv.b };
+  }
+  if (fdlg.isPivotFilter) { fdlg.isPivotFilter.filter = finalFilter; closeDialog(); refreshPivotView(); return; }
+  if (finalFilter) state.filters[tn][col] = finalFilter; else delete state.filters[tn][col];
+  state.page = 0; closeDialog(); refreshTableView();
+}
+function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler); _fdlgCloseHandler = null; $('#dialog-root').innerHTML = ''; state.fdlg = null; }
+
+// ============================================================
+// PIVOT MODE
+// ============================================================
+function renderPivotMode() {
+  const wrap = el('div', { class:'pivot-mode' });
+  wrap.appendChild(renderPivotFields());
+  const content = el('div', { class:'pivot-content' });
+  content.appendChild(renderPivotToolbar());
+  
+  const reportFilters = renderPivotReportFilters();
+  if (reportFilters) content.appendChild(reportFilters);
+
+  const scroll = el('div', { class:'grid-scroll', id: 'pivot-grid-scroll' });
+  if (state.pivotShape) scroll.appendChild(renderPivotGrid());
+  else scroll.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, 'Add fields to Rows / Columns / Values to build a pivot.'));
+  content.appendChild(scroll);
+  content.appendChild(renderPivotStatusBar());
+  wrap.appendChild(content); return wrap;
+}
+
+function renderPivotFields() {
+  const tn = state.activeTable, table = state.tables.find(t => t.name === tn), pv = state.pivot[tn], wrap = el('div', { class:'pivot-fields' });
+  wrap.appendChild(el('div', { class:'pivot-fields-h' }, 'PivotTable Fields'));
+  wrap.appendChild(el('input', { type:'text', placeholder:'Search fields…', style:'margin:6px 8px; padding:4px 6px; border:1px solid var(--border); border-radius:3px; font-size:12px; width:calc(100% - 16px); box-sizing:border-box; flex-shrink:0;', oninput: (e) => {
+    listWrap.innerHTML = ''; const q = e.target.value.toLowerCase();
+    for (const c of table.schema.filter(c => !q || c.name.toLowerCase().includes(q))) {
+      const checked = pv.rows.some(r=>r.col===c.name) || pv.cols.some(r=>r.col===c.name) || pv.values.some(r=>r.col===c.name) || pv.filters.some(r=>r.col===c.name);
+      listWrap.appendChild(el('div', { class:'pivot-field', draggable:'true', ondragstart: (e) => { e.dataTransfer.setData('text/pivot-move', JSON.stringify({col:c.name, from:'list', idx:-1})); e.dataTransfer.effectAllowed = 'copy'; } },
+        el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => { if (e.target.checked) { if (c.kind === 'num') pv.values.push({ col: c.name, agg: 'SUM' }); else pv.rows.push({ col: c.name }); } else removeFieldFromAll(pv, c.name); refreshPivotView(); } }),
+        el('span', { style:'flex:1; overflow:hidden; text-overflow:ellipsis;' }, c.name), el('span', { style:'color:var(--text-faint); font-size:10px;' }, kindLabel(c.kind))
+      ));
+    }
+  }}));
+  const listWrap = el('div', { class:'pivot-fields-list' });
+  for (const c of table.schema) {
+    const checked = pv.rows.some(r=>r.col===c.name) || pv.cols.some(r=>r.col===c.name) || pv.values.some(r=>r.col===c.name) || pv.filters.some(r=>r.col===c.name);
+    listWrap.appendChild(el('div', { class:'pivot-field', draggable:'true', ondragstart: (e) => { e.dataTransfer.setData('text/pivot-move', JSON.stringify({col:c.name, from:'list', idx:-1})); e.dataTransfer.effectAllowed = 'copy'; } },
+      el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => { if (e.target.checked) { if (c.kind === 'num') pv.values.push({ col: c.name, agg: 'SUM' }); else pv.rows.push({ col: c.name }); } else removeFieldFromAll(pv, c.name); refreshPivotView(); } }),
+      el('span', { style:'flex:1; overflow:hidden; text-overflow:ellipsis;' }, c.name), el('span', { style:'color:var(--text-faint); font-size:10px;' }, kindLabel(c.kind))
+    ));
+  }
+  wrap.appendChild(listWrap);
+  const tilesWrap = el('div', { class:'pivot-tiles' });
+  const tile = (key, label, icon, items, isVal=false) => el('div', { class:'pivot-tile', ondragover: (e) => { e.preventDefault(); e.currentTarget.classList.add('dragover'); }, ondragleave: (e) => e.currentTarget.classList.remove('dragover'), ondrop: (e) => {
+    e.preventDefault(); e.currentTarget.classList.remove('dragover'); const moveData = e.dataTransfer.getData('text/pivot-move'); if (!moveData) return;
+    const { col, from, filter: _filter, agg } = JSON.parse(moveData); if (from === key) return;
+    const filter = deserializeFilter(_filter);
+    const c = table.schema.find(s => s.name === col); removeFieldFromAll(pv, col);
+    if (key === 'values') pv.values.push({ col, filter, agg: agg || (c?.kind === 'num' ? 'SUM' : 'COUNT') }); else pv[key].push({ col, filter });
+    refreshPivotView();
+  }}, el('div', { class:'pivot-tile-h' }, icon, label), (() => { const body = el('div', { class:'pivot-tile-body' }); items.forEach((it, idx) => body.appendChild(renderChip(key, it, idx))); return body; })());
+  tilesWrap.appendChild(tile('filters', 'Filters', iconEl(ICONS.funnel), pv.filters)); tilesWrap.appendChild(tile('cols', 'Columns', iconEl(ICONS.cols), pv.cols)); tilesWrap.appendChild(tile('rows', 'Rows', iconEl(ICONS.rows), pv.rows)); tilesWrap.appendChild(tile('values', 'Σ Values', iconEl(ICONS.sigma), pv.values, true));
+  wrap.appendChild(tilesWrap); return wrap;
+}
+
+function removeFieldFromAll(pv, col) {
+  pv.rows = pv.rows.filter(r => r.col !== col); pv.cols = pv.cols.filter(r => r.col !== col);
+  pv.values = pv.values.filter(r => r.col !== col); pv.filters = pv.filters.filter(r => r.col !== col);
+}
+
+function renderChip(tileKey, item, idx) {
+  const tn = state.activeTable, pv = state.pivot[tn], chip = el('div', { class:'pivot-chip', draggable:'true' });
+  chip.appendChild(el('span', { class:'name' }, item.col));
+  if (tileKey === 'values') { chip.appendChild(el('select', { class:'agg-select', onchange: (e) => { item.agg = e.target.value; refreshPivotView(); } }, ...VALUE_AGGREGATIONS.map(a => el('option', { value:a, selected: item.agg === a ? '' : null }, a.replace('_',' '))))); }
+  if (tileKey !== 'values') { chip.appendChild(el('span', { class: 'filter-btn' + (item.filter ? ' active' : ''), title: 'Set filter', html: item.filter ? ICONS.funnelFilled : ICONS.funnel, onclick: (e) => { e.stopPropagation(); openPivotFilterDialog(item, e.currentTarget); } })); }
+  chip.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/pivot-move', JSON.stringify({col:item.col, from:tileKey, idx, filter:serializeFilter(item.filter), agg:item.agg})); e.dataTransfer.effectAllowed = 'move'; chip.classList.add('dragging'); });
+  chip.addEventListener('dragend', (e) => { chip.classList.remove('dragging'); if (e.dataTransfer.dropEffect === 'none') { removeFieldFromAll(pv, item.col); refreshPivotView(); } });
+  chip.addEventListener('dragover', (e) => { if (!e.dataTransfer.types.includes('text/pivot-move')) return; e.preventDefault(); e.stopPropagation(); const before = e.clientY < chip.getBoundingClientRect().top + chip.getBoundingClientRect().height / 2; chip.classList.toggle('drag-over-before', before); chip.classList.toggle('drag-over-after', !before); });
+  chip.addEventListener('dragleave', () => chip.classList.remove('drag-over-before', 'drag-over-after'));
+  chip.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); chip.classList.remove('drag-over-before', 'drag-over-after');
+    const { col, from, idx: srcIdx, filter: _filter2, agg } = JSON.parse(e.dataTransfer.getData('text/pivot-move') || '{}'); if (!col) return;
+    const filter = deserializeFilter(_filter2);
+    const before = e.clientY < chip.getBoundingClientRect().top + chip.getBoundingClientRect().height / 2, targetIdx = idx;
+    if (from === tileKey) { const moving = pv[tileKey].splice(srcIdx, 1)[0], insertAt = targetIdx - (srcIdx < targetIdx ? (before?1:0) : (before?0:-1)); pv[tileKey].splice(Math.max(0, insertAt + (before ? 0 : 1)), 0, moving); }
+    else { removeFieldFromAll(pv, col); const c = state.tables.find(t => t.name === tn).schema.find(s => s.name === col); const restoredFilter = deserializeFilter(filter); const entry = tileKey === 'values' ? { col, filter: restoredFilter, agg: agg || (c?.kind === 'num' ? 'SUM' : 'COUNT') } : { col, filter: restoredFilter }; pv[tileKey].splice(before ? targetIdx : targetIdx + 1, 0, entry); }
+    refreshPivotView();
+  });
+  return chip;
+}
+
+async function openPivotFilterDialog(filterItem, anchor) {
+  const tn = state.activeTable;
+  const colDef = state.tables.find(t => t.name === tn).schema.find(s => s.name === filterItem.col);
+  const existing = filterItem.filter || null;
+  const makeAdv = (type) => ({
+    num:  existing?.type === 'num'  ? { ...existing } : { type:'num',  op:'>',        a:'', b:'' },
+    date: existing?.type === 'date' ? { ...existing } : { type:'date', op:'>',        a:'', b:'' },
+    text: existing?.type === 'text' ? { ...existing } : { type:'text', op:'contains', a:'', b:'', not: false },
+  }[type] ?? { type:'text', op:'contains', a:'', b:'', not: false });
+  state.fdlg = {
+    col: colDef,
+    tab: existing && existing.type !== 'values' ? existing.type : 'values',
+    search: '',
+    values: null, valuesTotal: 0, valuesLoaded: 0, pageStep: 500,
+    selected: existing?.type === 'values' && existing.included ? new Set(existing.included) : null,
+    includeBlank: existing?.type === 'values' ? existing.includeBlank !== false : true,
+    selectAll: !existing || existing.type !== 'values' || !existing.included,
+    advNum:  makeAdv('num'),
+    advDate: makeAdv('date'),
+    advText: makeAdv('text'),
+    isPivotFilter: filterItem,
+  };
+  renderFilterDialog(anchor);
+  await loadDistinctValues(colDef);
+  if (existing && existing.type !== 'values') {
+    state.fdlg.filteredValues = await computePassingValues(colDef, existing);
+    state.fdlg.selectAll = false;
+    state.fdlg.selected = new Set(state.fdlg.filteredValues);
+  }
+  renderFilterDialog(anchor);
+}
+
+function renderPivotReportFilters() {
+  const pv = state.pivot[state.activeTable];
+  if (!pv.filters || pv.filters.length === 0) return null;
+  const wrap = el('div', { class: 'pivot-report-filters' });
+  for (const f of pv.filters) {
+    let filterText = '(All)';
+    if (f.filter) {
+      if (f.filter.type === 'values') {
+        if (f.filter.included && f.filter.included.size === 1) filterText = [...f.filter.included][0];
+        else if (f.filter.included && f.filter.included.size > 1) filterText = '(Multiple Items)';
+        else filterText = '(Custom)';
+      } else filterText = '(Custom)';
+    }
+    const hasActiveFilter = !!f.filter;
+    wrap.appendChild(el('div', { class: 'prf-row' },
+      el('span', { class: 'prf-label' }, f.col + ':'),
+      el('div', { class: 'prf-btn', onclick: (e) => openPivotFilterDialog(f, e.currentTarget) },
+        el('span', null, filterText),
+        el('span', { style: hasActiveFilter ? 'color:#fff;' : 'opacity:0.6;', html: hasActiveFilter ? ICONS.funnelFilled : ICONS.funnel })
+      )
+    ));
+  }
+  return wrap;
+}
+
+function renderPivotToolbar() {
+  const pv = state.pivot[state.activeTable];
+  return el('div', { class:'pivot-toolbar' },
+    el('span', null, 'Subtotals:'), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, o))),
+    el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, 'Expand All'),
+    el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, 'Collapse All'),
+    el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); } }, 'Clear'),
+    el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, 'Export ⌄'))
+  );
+}
+
+function expandAll(pv) {
+  const rs = new Set(), cs = new Set();
+  if (state.pivotShape) {
+    const wr = (n) => { rs.add(n.key); (n.children||[]).forEach(wr); }; state.pivotShape.rowTree.forEach(wr);
+    const wc = (n) => { cs.add(n.key); (n.children||[]).forEach(wc); }; state.pivotShape.colTree.forEach(wc);
+  }
+  return { rows: rs, cols: cs };
+}
+function renderPivotStatusBar() { return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? `${state.pivotShape.leafRows.length.toLocaleString()} row groups · ${state.pivotShape.leafCols.length.toLocaleString()} column groups` : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
+
+async function refreshPivotView() {
+  const tn = state.activeTable, pv = state.pivot[tn], table = state.tables.find(t => t.name === tn);
+  if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) { state.pivotData = null; state.pivotShape = null; renderContent(); return; }
+  
+  const filterMap = {};
+  for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
+  const where = buildWhere(table, filterMap);
+  const rowDims = pv.rows.map(r => r.col), colDims = pv.cols.map(c => c.col), allDims = [...rowDims, ...colDims];
+  
+  const valExprs = pv.values.map((v, i) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid('v'+i)}`);
+  const groupCols = allDims.map((col, i) => `GROUPING(${qid(col)}) AS ${qid('g_'+i)}`);
+  
+  let groupClause;
+  if (rowDims.length === 0) groupClause = colDims.length ? `GROUP BY ROLLUP(${colDims.map(qid).join(',')})` : '';
+  else if (colDims.length === 0) groupClause = `GROUP BY ROLLUP(${rowDims.map(qid).join(',')})`;
+  else groupClause = `GROUP BY ROLLUP(${rowDims.map(qid).join(',')}), ROLLUP(${colDims.map(qid).join(',')})`;
+  
+  try {
+    const res = await runQuery(`SELECT ${[...allDims.map(qid), ...groupCols, ...valExprs].join(', ')} FROM ${qid(tn)} ${where} ${groupClause}`);
+    state.pivotData = res.rows; state.pivotShape = buildPivotShape(rowDims, colDims, pv.values, res.rows, pv);
+    const sig = rowDims.join('|') + '||' + colDims.join('|');
+    if (pv._dimSig !== sig && state.pivotShape) { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; pv._dimSig = sig; }
+    renderContent();
+  } catch (e) { console.error(e); toast('Pivot query failed: ' + e.message, true); }
+}
+
+function rebuildPivotShape() {
+  if (state.pivotData && state.pivotShape) state.pivotShape = buildPivotShape(state.pivotShape.rowDims, state.pivotShape.colDims, state.pivotShape.valueDefs, state.pivotData, state.pivot[state.activeTable]);
+}
+
+function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
+  const rowTreeRoot = { key: '__root', label: 'Grand Total', children: [], depth: -1, vals: [], _byKey: new Map() };
+  const colTreeRoot = { key: '__root', label: 'Grand Total', children: [], depth: -1, vals: [], _byKey: new Map() };
+  const cellMap = new Map();
+
+  for (const r of rows) {
+    let rDepth = rowDims.length; for (let i = 0; i < rowDims.length; i++) if (Number(r['g_' + i]) === 1) { rDepth = i; break; }
+    let cDepth = colDims.length; for (let i = 0; i < colDims.length; i++) if (Number(r['g_' + (rowDims.length + i)]) === 1) { cDepth = i; break; }
+
+    const rVals = rowDims.map(d => r[d]), cVals = colDims.map(d => r[d]);
+    const rKey = safeJoin(rVals.slice(0, rDepth)), cKey = safeJoin(cVals.slice(0, cDepth));
+    cellMap.set(rKey + '#' + cKey, valueDefs.map((_, i) => r['v'+i]));
+
+    if (rDepth === rowDims.length && cDepth === colDims.length) {
+      let node = rowTreeRoot;
+      for (let i = 0; i < rowDims.length; i++) {
+        const key = '__root|' + safeJoin(rVals.slice(0, i+1));
+        let child = node._byKey.get(key);
+        if (!child) { child = { key, label: rVals[i] === null || rVals[i] === undefined ? '∅' : String(rVals[i]), children: [], depth: i, vals: rVals.slice(0, i+1), _byKey: new Map() }; node._byKey.set(key, child); node.children.push(child); }
+        node = child;
+      }
+      let cnode = colTreeRoot;
+      for (let i = 0; i < colDims.length; i++) {
+        const key = '__root|' + safeJoin(cVals.slice(0, i+1));
+        let child = cnode._byKey.get(key);
+        if (!child) { child = { key, label: cVals[i] === null || cVals[i] === undefined ? '∅' : String(cVals[i]), children: [], depth: i, vals: cVals.slice(0, i+1), _byKey: new Map() }; cnode._byKey.set(key, child); cnode.children.push(child); }
+        cnode = child;
+      }
+    }
+  }
+
+  const sortTree = (n) => { n.children.sort((a,b) => { const av = a.vals[a.vals.length-1], bv = b.vals[b.vals.length-1]; return typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv)); }); n.children.forEach(sortTree); };
+  sortTree(rowTreeRoot); sortTree(colTreeRoot);
+
+  const leafCols = [];
+  function walkCol(node) {
+    const isRoot = node === colTreeRoot;
+    if (!isRoot && node.children.length === 0) { leafCols.push({ ...node, isColSubtotal: false, isCollapsed: false }); return; }
+    const isExpanded = isRoot || pv.colExpanded.has(node.key);
+    if (isExpanded && node.children.length > 0) {
+      node.children.forEach(walkCol);
+      if (pv.subtotals !== 'off' && !isRoot) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
+    } else if (!isRoot) leafCols.push({ ...node, isColSubtotal: false, isCollapsed: true });
+  }
+  if (colDims.length === 0) leafCols.push({ key:'__all', label:'Total', vals:[], depth: -1, isColSubtotal: false }); else colTreeRoot.children.forEach(walkCol);
+
+  const leafRows = [], flatRowOrder = [];
+  function walkRow(node) {
+    const isRoot = node === rowTreeRoot;
+    if (!isRoot) leafRows.push(node);
+    const isExpanded = isRoot || pv.expanded.has(node.key);
+    if (isExpanded && node.children.length > 0) {
+      if (pv.subtotals === 'top' && !isRoot) flatRowOrder.push({ node, isSubtotal: true });
+      node.children.forEach(walkRow);
+      if (pv.subtotals === 'bottom' && !isRoot) flatRowOrder.push({ node, isSubtotal: true });
+    } else if (!isRoot) flatRowOrder.push({ node, isSubtotal: node.children.length > 0 });
+  }
+  walkRow(rowTreeRoot);
+  flatRowOrder.push({ node: rowTreeRoot, isSubtotal: false, isGrand: true });
+
+  return { rowDims, colDims, valueDefs, leafRows, leafCols, flatRowOrder, rowTree: rowTreeRoot.children, colTree: colTreeRoot.children, cellMap };
+}
+
+function getColNode(nodes, key) {
+  for (const n of nodes) { if (n.key === key) return n; if (key.startsWith(n.key + '|')) { const found = getColNode(n.children, key); if (found) return found; } }
+  return null;
+}
+
+// Map col-header depth -> background color (darkest at outermost level)
+const PV_HEADER_COLORS = ['#2e5fa3','#4a7abf','#6d99d0','#93b3de','#a8c0e4'];
+function pvHdrBg(depth) { return PV_HEADER_COLORS[Math.min(depth, PV_HEADER_COLORS.length - 1)]; }
+
+function renderPivotGrid() {
+  const sh = state.pivotShape, pv = state.pivot[state.activeTable], nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
+  const table = el('table', { class:'pgrid' }), colHeaderRows = Math.max(1, sh.colDims.length), thead = el('thead');
+
+  for (let lvl = 0; lvl < colHeaderRows; lvl++) {
+    const tr = el('tr');
+    if (lvl === 0) tr.appendChild(el('th', { class:'label', rowspan: colHeaderRows + (nValues > 1 ? 1 : 0) }, sh.rowDims.length ? sh.rowDims.join(' / ') : ''));
+
+    if (!hasColDims) { tr.appendChild(el('th', { colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, 'Grand Total')); thead.appendChild(tr); continue; }
+
+    let i = 0;
+    while (i < sh.leafCols.length) {
+      const col = sh.leafCols[i];
+      if (col.isColSubtotal && lvl === col.depth) {
+        const rs = colHeaderRows - lvl;
+        // col-subtotal header: one shade lighter than the depth it belongs to
+        const subBg = pvHdrBg(col.depth + 1);
+        tr.appendChild(el('th', { rowspan: rs, colspan: nValues, style: `background:${subBg}; color:#fff; font-weight:700;` }, col.label + ' Total')); i++; continue;
+      }
+      if (col.isColSubtotal && lvl > col.depth) { i++; continue; }
+      if (!col.isColSubtotal && lvl >= col.vals.length) { i++; continue; }
+
+      let j = i;
+      while (j < sh.leafCols.length) {
+        const nextCol = sh.leafCols[j];
+        if (nextCol.isColSubtotal && lvl >= nextCol.depth) break;
+        if (!nextCol.isColSubtotal && lvl >= nextCol.vals.length) break;
+        if (String(nextCol.vals[lvl]) !== String(col.vals[lvl])) break;
+        j++;
+      }
+
+      const th = el('th', { colspan: (j - i) * nValues, rowspan: col.vals.length === lvl + 1 ? colHeaderRows - lvl : 1,
+        style: `background:${pvHdrBg(lvl)}; color:#fff;` });
+      const groupKey = '__root|' + safeJoin(col.vals.slice(0, lvl + 1)), node = getColNode(sh.colTree, groupKey);
+      if (node && node.children.length > 0) {
+        const isExp = pv.colExpanded.has(groupKey);
+        th.appendChild(el('span', { class:'chev', style:'margin-right:4px; color:#fff;', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.colExpanded.delete(groupKey); else pv.colExpanded.add(groupKey); rebuildPivotShape(); renderContent(); } }));
+      }
+      const label = col.vals[lvl] !== undefined ? String(col.vals[lvl]) : '';
+      th.appendChild(document.createTextNode(label === 'null' || label === 'undefined' ? '∅' : label));
+      tr.appendChild(th); i = j;
+    }
+    if (lvl === 0) tr.appendChild(el('th', { rowspan: colHeaderRows, colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, 'Grand Total'));
+    thead.appendChild(tr);
+  }
+
+  if (nValues > 1) {
+    const tr = el('tr');
+    const deepestLvl = Math.max(0, sh.colDims.length - 1);
+    for (const col of sh.leafCols) {
+      const bg = col.isColSubtotal ? pvHdrBg(col.depth + 1) : pvHdrBg(deepestLvl);
+      for (const vdef of sh.valueDefs) tr.appendChild(el('th', { style: `background:${bg}; color:#fff; font-weight:500;` }, `${vdef.agg.replace('_',' ')}(${vdef.col})`));
+    }
+    if (hasColDims) for (const vdef of sh.valueDefs) tr.appendChild(el('th', { style:`background:${pvHdrBg(0)}; color:#fff; font-weight:500;` }, `${vdef.agg.replace('_',' ')}(${vdef.col})`));
+    thead.appendChild(tr);
+  }
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  for (const entry of sh.flatRowOrder) {
+    const node = entry.node, isGrand = !!entry.isGrand, isSubtotal = !!entry.isSubtotal;
+    let rowStyle = '';
+    let rowClass = '';
+    if (isGrand) {
+      rowClass = 'grandtotal';
+    } else if (isSubtotal) {
+      rowClass = 'subtotal';
+      // Only the outermost subtotal level gets a top border; no inline weight override —
+      // the label td handles per-depth font weight below.
+      if (node.depth === 0) rowStyle = 'border-top: 2px solid var(--pv-border);';
+    } else {
+      rowStyle = '';
+    }
+
+    // "Automotive Total" → "Automotive" (no suffix); label font weight: bold only at depth 0
+    const labelStr = isGrand
+      ? 'Grand Total'
+      : node.label;   // suffix removed; hierarchy is clear from indentation + bold
+
+    const labelTd = el('td', { class:'label', style: `padding-left:${8 + (node.depth + 1) * 12}px; font-weight:${isSubtotal && node.depth === 0 ? '700' : (isSubtotal ? '600' : '400')};` });
+    const tr = el('tr', { class: rowClass, style: rowStyle });
+    if (!isGrand && node.children.length > 0) {
+      const isExp = pv.expanded.has(node.key);
+      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.expanded.delete(node.key); else pv.expanded.add(node.key); rebuildPivotShape(); renderContent(); } }));
+      labelTd.appendChild(document.createTextNode(' ' + labelStr));
+    } else labelTd.textContent = labelStr;
+    tr.appendChild(labelTd);
+
+    const rKey = isGrand ? '' : safeJoin(node.vals);
+    for (const leafCol of sh.leafCols) {
+      const cKey = safeJoin(leafCol.vals), cell = sh.cellMap.get(rKey + '#' + cKey);
+      const isColSub = !!leafCol.isColSubtotal;
+      let cellStyle = '';
+      if (isGrand) {
+        cellStyle = 'background:var(--pv-grand); font-weight:700;';
+      } else if (isSubtotal && isColSub) {
+        cellStyle = 'background:#c8d8ee; font-weight:700;';
+      } else if (isColSub) {
+        cellStyle = 'background:var(--pv-sub-col); font-weight:600;';
+      } else if (isSubtotal) {
+        cellStyle = 'background:var(--pv-sub-row); font-weight:600;';
+      }
+      for (let vi = 0; vi < sh.valueDefs.length; vi++) { const v = cell ? cell[vi] : null; tr.appendChild(el('td', { style: cellStyle }, v === null || v === undefined ? '' : fmtNum(v))); }
+    }
+    if (hasColDims) {
+      const grandCell = sh.cellMap.get(rKey + '#');
+      for (let vi = 0; vi < sh.valueDefs.length; vi++) { const v = grandCell ? grandCell[vi] : null; tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:#b4c6e7; font-weight:700; border-left:2px solid var(--pv-border);' : 'background:#dce6f3; font-weight:600; border-left:2px solid var(--pv-border);' }, v === null || v === undefined ? '' : fmtNum(v))); }
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody); return table;
+}
+
+// Always use en-US locale: 1,234,567.89 — never mix commas/dots across columns.
+const NUM_FMT_INT  = new Intl.NumberFormat('en-US');
+const NUM_FMT_DEC  = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
+const NUM_FMT_CELL = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 });
+function fmtNum(v) {
+  if (typeof v !== 'number') return String(v);
+  return Number.isInteger(v) ? NUM_FMT_INT.format(v) : NUM_FMT_DEC.format(v);
+}
+
+// ============================================================
+// SQL CONSOLE MODE
+// ============================================================
+let sqlEditor = null;
+function renderSQLMode() {
+  const wrap = el('div', { class:'sql-mode' });
+  wrap.appendChild(el('div', { class:'sql-edit-wrap' }, el('textarea', { id:'sql-editor-ta' }, state.sqlText)));
+  wrap.appendChild(el('div', { class:'sql-toolbar' }, el('button', { class:'primary', onclick: runSQLEditor }, '▶ Run (Ctrl/Cmd+Enter)'), el('span', { style:'color:var(--text-faint); font-size:11px;' }, 'Loaded tables are queryable by name.'), el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('sql'), disabled: state.sqlResult ? null : '' }, 'Export Result ⌄'))));
+  if (state.sqlError) wrap.appendChild(el('div', { class:'sql-error' }, state.sqlError));
+  const resultWrap = el('div', { class:'grid-scroll', style:'flex:1;' });
+  if (state.sqlResult) resultWrap.appendChild(renderSimpleGrid(state.sqlResult.rows, state.sqlResult.columns)); else resultWrap.appendChild(el('div', { style:'padding:24px; color:var(--text-faint);' }, 'Run a query to see results.'));
+  wrap.appendChild(resultWrap);
+  wrap.appendChild(el('div', { class:'statusbar' }, el('span', null, state.sqlResult ? `${state.sqlResult.rows.length.toLocaleString()} rows` : ''), el('span', { style:'margin-left:auto;' }, state.sqlResult ? `${state.sqlResult.ms.toFixed(0)} ms` : '')));
+  return wrap;
+}
+
+function initSQLEditor() {
+  const ta = $('#sql-editor-ta'); if (!ta || sqlEditor) return;
+  sqlEditor = CodeMirror.fromTextArea(ta, { mode: 'text/x-sql', lineNumbers: true, theme: 'idea', tabSize: 2, indentWithTabs: false, extraKeys: { 'Ctrl-Enter': runSQLEditor, 'Cmd-Enter': runSQLEditor } });
+  sqlEditor.setSize('100%','100%'); sqlEditor.on('change', () => state.sqlText = sqlEditor.getValue());
+}
+
+async function runSQLEditor() {
+  if (!sqlEditor) return; const sql = sqlEditor.getValue(); state.sqlError = null;
+  try { state.sqlResult = await runQuery(sql); } catch (e) { state.sqlError = e.message; state.sqlResult = null; }
+  renderContent(); setTimeout(initSQLEditor, 0);
+}
+
+function renderSimpleGrid(rows, columns) {
+  const table = el('table', { class:'dgrid' }), trH = el('tr');
+  for (const c of columns) trH.appendChild(el('th', null, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, c.name, el('span', { class:'col-type' }, kindLabel(c.kind))))));
+  table.appendChild(el('thead', null, trH)); const tbody = el('tbody'), limit = Math.min(rows.length, 5000);
+  for (let i = 0; i < limit; i++) {
+    const tr = el('tr');
+    for (const c of columns) { const v = rows[i][c.name], isNull = v === null || v === undefined; tr.appendChild(el('td', { class: (isNull?'null ':'') + (c.kind==='num'?'num':'') }, isNull ? 'NULL' : fmtCell(v, c.kind))); }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  if (rows.length > limit) tbody.appendChild(el('tr', null, el('td', { colspan: columns.length, style:'text-align:center; padding:8px; color:var(--text-faint);' }, `…${(rows.length - limit).toLocaleString()} more rows omitted from display`)));
+  return table;
+}
+
+// ============================================================
+// EXPORT
+// ============================================================
+function openExportMenu(source) {
+  const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
+  const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  const menu = el('div', { class:'ctx-menu', style:'right:16px; bottom:40px;' }, el('div', { class:'ctx-menu-item', onclick: () => { close(); doExport(source, 'csv'); } }, 'Export CSV'), el('div', { class:'ctx-menu-item', onclick: () => { close(); doExport(source, 'json'); } }, 'Export JSON'), el('div', { class:'ctx-menu-item', onclick: () => { close(); doExport(source, 'parquet'); } }, 'Export Parquet'));
+  $('#dialog-root').appendChild(menu); setTimeout(() => document.addEventListener('mousedown', outside), 0);
+}
+
+async function doExport(source, format) {
+  try {
+    let sql; const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
+    if (source === 'table') {
+      const filters = state.filters[tn] || {}, sort = state.sorts[tn];
+      sql = `SELECT ${table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
+    } else if (source === 'sql') { sql = sqlEditor ? sqlEditor.getValue() : state.sqlText; }
+    else if (source === 'pivot') {
+      const pv = state.pivot[tn], filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
+      const allDims = [...pv.rows.map(r => r.col), ...pv.cols.map(c => c.col)];
+      const valExprs = pv.values.map((v) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid(v.col + '_' + v.agg)}`);
+      sql = `SELECT ${[...allDims.map(qid), ...valExprs].join(', ')} FROM ${qid(tn)} ${buildWhere(table, filterMap)} ${allDims.length ? `GROUP BY ${allDims.map(qid).join(',')}` : ''}`;
+    }
+    const outName = `export_${Date.now()}.${format}`, copySQL = format === 'csv' ? `COPY (${sql}) TO '${outName}' (FORMAT CSV, HEADER true)` : format === 'json' ? `COPY (${sql}) TO '${outName}' (FORMAT JSON, ARRAY true)` : `COPY (${sql}) TO '${outName}' (FORMAT PARQUET)`;
+    await state.conn.query(copySQL);
+    const buf = await state.db.copyFileToBuffer(outName);
+    const url = URL.createObjectURL(new Blob([buf], { type: format === 'json' ? 'application/json' : (format === 'csv' ? 'text/csv' : 'application/octet-stream') }));
+    const a = document.createElement('a'); a.href = url; a.download = outName; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try { await state.db.dropFile(outName); } catch (_) {}
+    toast(`Exported ${outName}`);
+  } catch (e) { toast('Export failed: ' + e.message, true); }
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+(async () => {
+  const tbz = $('#tb-dropzone');
+  tbz.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); tbz.classList.add('dragover'); } });
+  tbz.addEventListener('dragleave', () => tbz.classList.remove('dragover'));
+  tbz.addEventListener('drop', (e) => { e.preventDefault(); tbz.classList.remove('dragover'); if (e.dataTransfer.files?.length) loadFiles(e.dataTransfer.files); });
+  tbz.addEventListener('click', () => $('#file-input').click());
+  $('#sidebar-toggle').addEventListener('click', () => { const sb = $('#sidebar'); sb.classList.toggle('collapsed'); $('#sidebar-toggle').textContent = sb.classList.contains('collapsed') ? '▶ Schema' : '◀ Schema'; });
+  window.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+  window.addEventListener('drop', (e) => { if (e.dataTransfer.files?.length) { e.preventDefault(); loadFiles(e.dataTransfer.files); } });
+  $('#file-input').addEventListener('change', (e) => { if (e.target.files?.length) loadFiles(e.target.files); e.target.value = ''; });
+  
+  renderAll();
+  try { await initDuckDB(); } catch (e) { $('#duckdb-status').textContent = 'duckdb FAILED'; toast('DuckDB initialization failed: ' + e.message, true); }
+})();
+</script>
+</body>
+</html>
