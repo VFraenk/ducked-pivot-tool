@@ -1,0 +1,23 @@
+{
+  "name": "ducked-pivot-tool",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "DuckDB-WASM parquet explorer with pivot, SQL and Excel export",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-plugin-singlefile": "^2.1.0",
+    "vitest": "^3.0.4"
+  }
+}
