@@ -223,6 +223,10 @@
     border-right: 2px solid var(--pv-border);
     border-bottom: none;
   }
+  /* Multiple row fields stacked vertically (one per line, lightly indented to mirror the nesting) */
+  table.pgrid th.label .rowdim-stack { display: flex; flex-direction: column; gap: 1px; line-height: 1.35; }
+  table.pgrid th.label .rowdim-name { white-space: nowrap; }
+  table.pgrid th.label .rowdim-name:not(:first-child) { font-weight: 600; color: rgba(255,255,255,0.92); }
   /* Data cells */
   table.pgrid td {
     padding: 4px 10px;
@@ -1848,7 +1852,8 @@ function renderPivotGrid() {
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
-    if (lvl === 0) tr.appendChild(el('th', { class:'label', rowspan: colHeaderRows + (nValues > 1 ? 1 : 0) }, sh.rowDims.length ? sh.rowDims.join(' / ') : ''));
+    if (lvl === 0) tr.appendChild(el('th', { class:'label', rowspan: colHeaderRows + (nValues > 1 ? 1 : 0) },
+      sh.rowDims.length ? el('div', { class:'rowdim-stack' }, ...sh.rowDims.map((d, i) => el('div', { class:'rowdim-name', style:`padding-left:${i * 10}px;` }, d))) : ''));
 
     if (!hasColDims) { tr.appendChild(el('th', { colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, tt('grandTotal'))); thead.appendChild(tr); continue; }
 
