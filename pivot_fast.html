@@ -1634,15 +1634,24 @@ function renderPivotGrid() {
     return fmtPct(Number(v) / Number(base));
   };
 
-  // A leaf data row is hidden when its share of the grand total (first value field) is below the threshold.
-  const rowBelowThreshold = (rKey) => {
-    if (!pv.hideBelowPct) return false;
-    const rt = sh.cellMap.get(rKey + '#'), gv = grandCellAll ? Number(grandCellAll[0]) : null;
-    if (rt === undefined || gv === null || gv === 0) return false;
-    const rv = Number(rt[0]);
-    if (!isFinite(rv)) return false;
-    return Math.abs(rv / gv) < PIVOT_HIDE_THRESHOLD;
-  };
+  // Build the set of row keys to hide when "< 1%" is on. A group whose share of the grand total
+  // (first value field) is below the threshold is pruned together with its whole subtree; a group
+  // above the threshold stays, but its own long-tail children are still pruned recursively. This
+  // applies at every level, so below-threshold parent/subtotal rows disappear too — not just leaves.
+  const hiddenRowKeys = new Set();
+  if (pv.hideBelowPct && grandCellAll && Number(grandCellAll[0]) !== 0) {
+    const grandV0 = Math.abs(Number(grandCellAll[0]));
+    const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
+    const walkHide = (nodes) => {
+      for (const n of nodes) {
+        const t = sh.cellMap.get(safeJoin(n.vals) + '#');
+        const share = t ? Math.abs(Number(t[0])) / grandV0 : null;
+        if (share !== null && isFinite(share) && share < PIVOT_HIDE_THRESHOLD) markSubtree(n);
+        else walkHide(n.children);
+      }
+    };
+    walkHide(sh.rowTree);
+  }
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
@@ -1714,8 +1723,8 @@ function renderPivotGrid() {
       rowStyle = '';
     }
 
-    // Hide long-tail leaf rows (only actual data leaves; subtotals and the grand total stay).
-    if (!isGrand && !isSubtotal && node.children.length === 0 && rowBelowThreshold(safeJoin(node.vals))) continue;
+    // Hide long-tail rows/groups (the grand total always stays).
+    if (!isGrand && hiddenRowKeys.has(node.key)) continue;
 
     // "Automotive Total" → "Automotive" (no suffix); label font weight: bold only at depth 0
     const labelStr = isGrand
