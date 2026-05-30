@@ -46,7 +46,7 @@
   }
   /* Telekom (Deutsche Telekom) magenta theme — selectable from Settings */
   :root[data-theme="telekom"] {
-    --accent: #e20074;
+    --accent: #e22074;
     --accent-bg: #fde6f1;
     --pill-bg: #fde6f1;
     --pill-border: #f3a6cf;
@@ -1490,7 +1490,15 @@ function renderChip(tileKey, item, idx) {
     const { col, from, idx: srcIdx, filter: _filter2, agg } = JSON.parse(e.dataTransfer.getData('text/pivot-move') || '{}'); if (!col) return;
     const filter = deserializeFilter(_filter2);
     const before = e.clientY < chip.getBoundingClientRect().top + chip.getBoundingClientRect().height / 2, targetIdx = idx;
-    if (from === tileKey) { const moving = pv[tileKey].splice(srcIdx, 1)[0], insertAt = targetIdx - (srcIdx < targetIdx ? (before?1:0) : (before?0:-1)); pv[tileKey].splice(Math.max(0, insertAt + (before ? 0 : 1)), 0, moving); }
+    if (from === tileKey) {
+      // Reorder within the tile. Use the target item's identity (not stale indices) so dragging
+      // up and down both land exactly before/after the chip dropped on.
+      if (srcIdx === idx) return;
+      const arr = pv[tileKey], moving = arr[srcIdx];
+      arr.splice(srcIdx, 1);
+      let ti = arr.indexOf(item); if (ti === -1) ti = arr.length;
+      arr.splice(before ? ti : ti + 1, 0, moving);
+    }
     else { removeFieldFromAll(pv, col); const c = state.tables.find(t => t.name === tn).schema.find(s => s.name === col); const restoredFilter = deserializeFilter(filter); const entry = tileKey === 'values' ? { col, filter: restoredFilter, agg: agg || (c?.kind === 'num' ? 'SUM' : 'COUNT') } : { col, filter: restoredFilter }; pv[tileKey].splice(before ? targetIdx : targetIdx + 1, 0, entry); }
     refreshPivotView();
   });
