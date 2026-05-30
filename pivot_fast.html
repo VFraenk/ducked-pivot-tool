@@ -41,6 +41,28 @@
     --pv-grand: #b4c6e7;   /* grand total row/col */
     --pv-grand-dark: #8faadc; /* grand total label */
     --pv-data-border: #e2e8f0; /* interior data cell borders */
+    --pv-sub-both: #c8d8ee;  /* row-subtotal × col-subtotal cell */
+    --pv-grp-label: #c2d4ec; /* top-level group label */
+  }
+  /* Telekom (Deutsche Telekom) magenta theme — selectable from Settings */
+  :root[data-theme="telekom"] {
+    --accent: #e20074;
+    --accent-bg: #fde6f1;
+    --pill-bg: #fde6f1;
+    --pill-border: #f3a6cf;
+    --row-hover: #fdf0f7;
+    --pv-h0: #8a0046;
+    --pv-h1: #b3005c;
+    --pv-h2: #cf0070;
+    --pv-h3: #e8579f;
+    --pv-border: #cf0070;
+    --pv-sub-col: #f7d6e8;
+    --pv-sub-row: #fdeef6;
+    --pv-grand: #f0aed1;
+    --pv-grand-dark: #e277b0;
+    --pv-data-border: #f3dbe8;
+    --pv-sub-both: #f1c2dd;
+    --pv-grp-label: #ecbcd8;
   }
   html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
   body { overflow: hidden; }
@@ -224,10 +246,10 @@
   }
   /* Row subtotals — soft blue-gray */
   table.pgrid tr.subtotal td { background: var(--pv-sub-row); font-weight: 600; }
-  table.pgrid tr.subtotal td.label { background: #dce6f3; }
+  table.pgrid tr.subtotal td.label { background: var(--pv-sub-col); }
   /* Top-level group rows: a stronger divider above and a deeper label shade for clear separation */
   table.pgrid tr.subtotal.lvl0 td { border-top: 3px solid var(--pv-h1); }
-  table.pgrid tr.subtotal.lvl0 td.label { background: #c2d4ec; }
+  table.pgrid tr.subtotal.lvl0 td.label { background: var(--pv-grp-label); }
   /* Grand total row */
   table.pgrid tr.grandtotal td {
     background: var(--pv-grand);
@@ -381,7 +403,7 @@ const state = {
   pivot: {}, pivotData: null, pivotShape: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
-  settings: { lang: 'de', locale: 'de', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
+  settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
 };
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
@@ -429,6 +451,8 @@ const I18N = {
     presetFilter: 'PKS Filter', presetFilterTitle: 'PKS Filter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS Filter gesetzt ({0} Felder)', presetCleared: 'PKS Filter entfernt', presetNoCols: 'Keine passenden Spalten für den PKS Filter gefunden',
     showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
+    sortRows: 'Zeilen:', sortCols: 'Spalten:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Wert ↓', sortValAsc: 'Wert ↑',
+    theme: 'Design', themeDefault: 'Standard (Blau)', themeTelekom: 'Telekom (Magenta)',
     hideBelow: '< 1 % ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter 1 % liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
@@ -482,6 +506,8 @@ const I18N = {
     presetFilter: 'PKS Filter', presetFilterTitle: 'Apply PKS filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS filter applied ({0} fields)', presetCleared: 'PKS filter cleared', presetNoCols: 'No matching columns for the PKS filter',
     showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
+    sortRows: 'Rows:', sortCols: 'Cols:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Value ↓', sortValAsc: 'Value ↑',
+    theme: 'Theme', themeDefault: 'Default (Blue)', themeTelekom: 'Telekom (Magenta)',
     hideBelow: 'Hide < 1%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below 1%',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
@@ -600,7 +626,7 @@ function serializePivot(pv) {
   return {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
     expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals,
-    showAs: pv.showAs, hideBelowPct: pv.hideBelowPct,
+    showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, rowSort: pv.rowSort, colSort: pv.colSort,
   };
 }
 function deserializePivot(s) {
@@ -610,6 +636,7 @@ function deserializePivot(s) {
     filters: (s.filters || []).map(field), cols: (s.cols || []).map(field), rows: (s.rows || []).map(field), values: (s.values || []).map(field),
     expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top',
     showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct,
+    rowSort: s.rowSort || { by: 'label', dir: 'asc' }, colSort: s.colSort || { by: 'label', dir: 'asc' },
   };
   // Pre-seed the dimension signature so the first refresh keeps the restored expand state
   // instead of treating it as a fresh dimension change and re-expanding everything.
@@ -828,7 +855,7 @@ function sanitizeTableName(filename, existing) {
   if (!base || /^\d/.test(base)) base = 't_' + base;
   let n = base, i = 1; while (existing.includes(n)) n = base + '_' + (++i); return n;
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' } }; }
 
 // FILTER -> SQL
 function buildWhere(table, filters) {
@@ -1540,8 +1567,15 @@ function renderPivotToolbar() {
   const stLabels = { top: tt('stTop'), bottom: tt('stBottom'), off: tt('stOff') };
   const presetOn = isPresetActive(pv);
   const showAsOpts = [['abs', tt('saAbs')], ['pctRow', tt('saPctRow')], ['pctCol', tt('saPctCol')], ['pctGrand', tt('saPctGrand')]];
+  const sortOpts = [['label-asc', tt('sortLabelAsc')], ['label-desc', tt('sortLabelDesc')], ['value-desc', tt('sortValDesc')], ['value-asc', tt('sortValAsc')]];
+  const rowSort = pv.rowSort || { by:'label', dir:'asc' }, colSort = pv.colSort || { by:'label', dir:'asc' };
+  const sortKey = (s) => `${s.by}-${s.dir}`;
+  const onSort = (which, v) => { const [by, dir] = v.split('-'); pv[which] = { by, dir }; rebuildPivotShape(); renderContent(); scheduleSave(); };
+  const sortSelect = (which, cur) => el('select', { class:'agg-select', onchange: (e) => onSort(which, e.target.value) }, sortOpts.map(([v,l]) => el('option', { value:v, selected: sortKey(cur)===v?'':null }, l)));
   return el('div', { class:'pivot-toolbar' },
     el('span', null, tt('subtotals')), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, stLabels[o]))),
+    el('span', null, tt('sortRows')), sortSelect('rowSort', rowSort),
+    el('span', null, tt('sortCols')), sortSelect('colSort', colSort),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
     el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, tt('clear')),
@@ -1629,8 +1663,19 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
     }
   }
 
-  const sortTree = (n) => { n.children.sort((a,b) => { const av = a.vals[a.vals.length-1], bv = b.vals[b.vals.length-1]; return typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv)); }); n.children.forEach(sortTree); };
-  sortTree(rowTreeRoot); sortTree(colTreeRoot);
+  // Row/column member ordering: by label (numeric-aware) or by the first value field's total,
+  // ascending or descending. Value totals come from the ROLLUP cells in cellMap.
+  const rowSort = pv.rowSort || { by: 'label', dir: 'asc' }, colSort = pv.colSort || { by: 'label', dir: 'asc' };
+  const cmpLabel = (a, b) => { const av = a.vals[a.vals.length-1], bv = b.vals[b.vals.length-1]; return (typeof av === 'number' && typeof bv === 'number') ? av - bv : String(av).localeCompare(String(bv)); };
+  const measureOf = (node, axis) => { const cell = axis === 'row' ? cellMap.get(safeJoin(node.vals) + '#') : cellMap.get('#' + safeJoin(node.vals)); const v = cell ? Number(cell[0]) : 0; return isFinite(v) ? v : 0; };
+  const sortTree = (n, axis, sort) => {
+    n.children.sort((a, b) => {
+      const c = sort.by === 'value' ? ((measureOf(a, axis) - measureOf(b, axis)) || cmpLabel(a, b)) : cmpLabel(a, b);
+      return sort.dir === 'desc' ? -c : c;
+    });
+    n.children.forEach(c => sortTree(c, axis, sort));
+  };
+  sortTree(rowTreeRoot, 'row', rowSort); sortTree(colTreeRoot, 'col', colSort);
 
   const leafCols = [];
   function walkCol(node) {
@@ -1667,8 +1712,22 @@ function getColNode(nodes, key) {
 }
 
 // Map col-header depth -> background color (darkest at outermost level)
-const PV_HEADER_COLORS = ['#2e5fa3','#4a7abf','#6d99d0','#93b3de','#a8c0e4'];
+// Pivot column-header backgrounds are applied as inline styles from JS, so they can't read CSS
+// variables — keep a per-theme palette and swap it in applyTheme().
+const PV_HEADER_PALETTES = {
+  default: ['#2e5fa3','#4a7abf','#6d99d0','#93b3de','#a8c0e4'],
+  telekom: ['#8a0046','#b3005c','#cf0070','#e8579f','#f49cc6'],
+};
+let PV_HEADER_COLORS = PV_HEADER_PALETTES.default;
 function pvHdrBg(depth) { return PV_HEADER_COLORS[Math.min(depth, PV_HEADER_COLORS.length - 1)]; }
+// Apply the selected theme: set the data-theme attribute (drives the CSS variables) and swap the
+// JS-driven pivot-header palette to match.
+function applyTheme() {
+  const th = state.settings.theme === 'telekom' ? 'telekom' : 'default';
+  if (th === 'default') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', th);
+  PV_HEADER_COLORS = PV_HEADER_PALETTES[th];
+}
 
 const PIVOT_HIDE_THRESHOLD = 0.01; // rows contributing < 1% of the grand total are hidden when the toggle is on
 
@@ -1842,7 +1901,7 @@ function renderPivotGrid() {
       if (isGrand) {
         cellStyle = 'background:var(--pv-grand); font-weight:700;';
       } else if (isSubtotal && isColSub) {
-        cellStyle = 'background:#c8d8ee; font-weight:700;';
+        cellStyle = 'background:var(--pv-sub-both); font-weight:700;';
       } else if (isColSub) {
         cellStyle = 'background:var(--pv-sub-col); font-weight:600;';
       } else if (isSubtotal) {
@@ -1852,7 +1911,7 @@ function renderPivotGrid() {
     }
     if (hasColDims) {
       const grandCell = isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#');
-      for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:#b4c6e7; font-weight:700; border-left:2px solid var(--pv-border);' : 'background:#dce6f3; font-weight:600; border-left:2px solid var(--pv-border);' }, cellText(grandCell, vi, rKey, ''))); }
+      for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : 'background:var(--pv-sub-col); font-weight:600; border-left:2px solid var(--pv-border);' }, cellText(grandCell, vi, rKey, ''))); }
     }
     tbody.appendChild(tr);
   }
@@ -2212,12 +2271,18 @@ function openSettingsMenu(anchor) {
   const localeItem = (key) => el('div', { class:'ctx-menu-item row', onclick: () => {
     state.settings.locale = key; rebuildNumberFormats(); renderContent(); updateSaveStatus(); savePrefsNow(); menu._close();
   }}, el('span', null, check(state.settings.locale === key), ' ' + LOCALES[key].label));
+  const themeItem = (key, label) => el('div', { class:'ctx-menu-item row', onclick: () => {
+    state.settings.theme = key; applyTheme(); renderContent(); savePrefsNow(); menu._close();
+  }}, el('span', null, check((state.settings.theme || 'default') === key), ' ' + label));
   menu = el('div', { class:'ctx-menu', style:'right:16px; top:44px; min-width:230px;' },
     el('div', { class:'ctx-menu-h' }, tt('language')),
     langItem('de'), langItem('en'),
     el('div', { class:'ctx-menu-sep' }),
     el('div', { class:'ctx-menu-h' }, tt('numberDateFormat')),
-    localeItem('de'), localeItem('en')
+    localeItem('de'), localeItem('en'),
+    el('div', { class:'ctx-menu-sep' }),
+    el('div', { class:'ctx-menu-h' }, tt('theme')),
+    themeItem('default', tt('themeDefault')), themeItem('telekom', tt('themeTelekom'))
   );
   openMenu(anchor, menu);
 }
@@ -2282,6 +2347,7 @@ async function restoreSession(prefs) {
     const g = prefs.global;
     if (g.lang && I18N[g.lang]) state.settings.lang = g.lang;
     if (g.locale && LOCALES[g.locale]) state.settings.locale = g.locale;
+    if (g.theme) state.settings.theme = g.theme;
     state.settings.rememberFiles = g.rememberFiles !== false;
     if (g.sidebarWidth) state.settings.sidebarWidth = g.sidebarWidth;
     if (g.pivotFieldsWidth) state.settings.pivotFieldsWidth = g.pivotFieldsWidth;
@@ -2309,6 +2375,7 @@ async function restoreSession(prefs) {
   applyPanelWidths();
   $('#sidebar').after(makeColResizer($('#sidebar'), '--sb-width', 'sidebarWidth', 150, 600));
 
+  applyTheme();
   applyStaticTexts();
   renderAll();
   try { await initDuckDB(); } catch (e) { setDbStatus('failed'); toast(tt('duckFailed', e.message), true); return; }
