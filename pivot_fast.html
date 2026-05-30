@@ -129,10 +129,11 @@
   .fdialog .body { flex: 1; overflow-y: auto; padding: 8px; min-height: 200px; }
   .fdialog input[type=text], .fdialog input[type=number], .fdialog select { width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; }
   .fdialog .vlist { font-size: 12px; overflow: auto; max-height: 320px; }
-  .fdialog .vlist-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; border-radius: 2px; width: max-content; min-width: 100%; box-sizing: border-box; }
+  .fdialog .vlist-inner { display: flex; flex-direction: column; width: max-content; min-width: 100%; }
+  .fdialog .vlist-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; border-radius: 2px; box-sizing: border-box; }
   .fdialog .vlist-item:hover { background: var(--bg-alt); }
   .fdialog .vlist-item input { margin: 0; flex-shrink: 0; }
-  .fdialog .vlist-item .count { margin-left: auto; padding-left: 16px; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; flex-shrink: 0; }
+  .fdialog .vlist-item .count { margin-left: auto; padding-left: 24px; text-align: right; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; flex-shrink: 0; }
   .fdialog .vlist-item .val { white-space: nowrap; }
   .fdialog .vlist-item .val.null { font-style: italic; color: var(--text-faint); }
   .fdialog .footer { padding: 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; justify-content: flex-end; }
@@ -224,6 +225,9 @@
   /* Row subtotals — soft blue-gray */
   table.pgrid tr.subtotal td { background: var(--pv-sub-row); font-weight: 600; }
   table.pgrid tr.subtotal td.label { background: #dce6f3; }
+  /* Top-level group rows: a stronger divider above and a deeper label shade for clear separation */
+  table.pgrid tr.subtotal.lvl0 td { border-top: 3px solid var(--pv-h1); }
+  table.pgrid tr.subtotal.lvl0 td.label { background: #c2d4ec; }
   /* Grand total row */
   table.pgrid tr.grandtotal td {
     background: var(--pv-grand);
@@ -1285,10 +1289,13 @@ function renderValuesList(container) {
   }
 
   // ── Individual value rows ──
+  // .vlist scrolls; .vlist-inner is max-content wide and stretches every row to the widest one,
+  // so the right-aligned counts line up in a single column even when labels vary in length.
   const scroll = el('div', { class:'vlist' });
+  const inner = el('div', { class:'vlist-inner' });
   for (const it of items) {
     const checked = fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value));
-    scroll.appendChild(el('label', { class:'vlist-item' },
+    inner.appendChild(el('label', { class:'vlist-item' },
       el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => {
         fdlg.selectAll = false;
         if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
@@ -1299,21 +1306,20 @@ function renderValuesList(container) {
       el('span', { class:'count' }, fmtCnt(it.count))
     ));
   }
-  if (items.length === 0 && !fdlg.hasNulls) scroll.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('noMatches')));
+  if (items.length === 0 && !fdlg.hasNulls) inner.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('noMatches')));
   if (fdlg.hasNulls && (!search || '(blanks)'.includes(search) || '(null)'.includes(search))) {
-    scroll.appendChild(el('div', { style:'border-top:1px solid var(--border); margin-top:4px; padding-top:4px;' },
-      el('label', { class:'vlist-item' },
-        el('input', { type:'checkbox', checked: fdlg.includeBlank ? '' : null, onchange: (e) => {
-          fdlg.includeBlank = e.target.checked;
-          fdlg.selectAll = false;
-          if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
-          renderValuesList(container);
-        }}),
-        el('span', { class:'val null' }, tt('blanksNull')),
-        el('span', { class:'count' }, fmtCnt(fdlg.nullCount||0))
-      )
+    inner.appendChild(el('label', { class:'vlist-item', style:'border-top:1px solid var(--border); margin-top:4px; padding-top:4px;' },
+      el('input', { type:'checkbox', checked: fdlg.includeBlank ? '' : null, onchange: (e) => {
+        fdlg.includeBlank = e.target.checked;
+        fdlg.selectAll = false;
+        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        renderValuesList(container);
+      }}),
+      el('span', { class:'val null' }, tt('blanksNull')),
+      el('span', { class:'count' }, fmtCnt(fdlg.nullCount||0))
     ));
   }
+  scroll.appendChild(inner);
   container.appendChild(scroll);
   if (savedScroll) scroll.scrollTop = savedScroll;
 }
@@ -1695,29 +1701,23 @@ function renderPivotGrid() {
     return r === null ? '' : fmtPct(r);
   };
 
-  // "< 1%" pruning. A row/group is KEPT when at least one of its displayed cells reaches the
-  // threshold (so a small row that is ≥1% within some column stays). In Absolute mode there is no
-  // percentage, so we fall back to the row's share of the grand total. Anything below is pruned
-  // together with its whole subtree, at every level. Pruned subtrees are remembered so total rows
-  // can show the real leftover instead of 100%.
+  // "< 1%" pruning. A row/group is KEPT when at least one of its cells is ≥1% of that cell's COLUMN
+  // total (so a small row that is ≥1% within some column stays). This basis is deliberately
+  // independent of the "Show values as" mode, so switching between relative and absolute display
+  // never changes which rows are hidden. Anything below is pruned together with its whole subtree,
+  // at every level. Pruned subtrees are remembered so total rows show the real leftover, not 100%.
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   if (pv.hideBelowPct) {
-    const grandV0 = grandCellAll ? Math.abs(Number(grandCellAll[0])) : 0;
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
     const nodeKeeps = (n) => {
       const rKey = safeJoin(n.vals);
-      if (showAs === 'abs') {
-        if (!grandV0) return true;
-        const t = cellMap.get(rKey + '#');
-        return t ? Math.abs(Number(t[0])) / grandV0 >= PIVOT_HIDE_THRESHOLD : true;
-      }
       for (const leafCol of sh.leafCols) {
-        const cKey = safeJoin(leafCol.vals), cell = cellMap.get(rKey + '#' + cKey);
-        if (!cell) continue;
+        const cKey = safeJoin(leafCol.vals), cell = cellMap.get(rKey + '#' + cKey), colTot = cellMap.get('#' + cKey);
+        if (!cell || !colTot) continue;
         for (let vi = 0; vi < nValues; vi++) {
-          const r = ratioFor(cell[vi], vi, rKey, cKey);
-          if (r !== null && Math.abs(r) >= PIVOT_HIDE_THRESHOLD) return true;
+          const base = Number(colTot[vi]);
+          if (base && Math.abs(Number(cell[vi]) / base) >= PIVOT_HIDE_THRESHOLD) return true;
         }
       }
       return false;
@@ -1808,10 +1808,9 @@ function renderPivotGrid() {
     if (isGrand) {
       rowClass = 'grandtotal';
     } else if (isSubtotal) {
-      rowClass = 'subtotal';
-      // Only the outermost subtotal level gets a top border; no inline weight override —
-      // the label td handles per-depth font weight below.
-      if (node.depth === 0) rowStyle = 'border-top: 2px solid var(--pv-border);';
+      // Top-level groups (depth 0) get the .lvl0 class for a stronger divider + label shade,
+      // so several expanded groups are clearly separated from one another.
+      rowClass = 'subtotal' + (node.depth === 0 ? ' lvl0' : '');
     } else {
       rowStyle = '';
     }
