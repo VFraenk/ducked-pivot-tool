@@ -117,7 +117,7 @@
   .statusbar { border-top: 1px solid var(--border); padding: 4px 10px; font-size: 11px; color: var(--text-dim); background: var(--bg-alt); display: flex; gap: 16px; align-items: center; height: 24px; flex-shrink: 0; }
   .statusbar .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
   /* Filter dialog */
-  .fdialog { position: fixed; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); z-index: 100; width: 320px; height: 460px; min-width: 260px; min-height: 240px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; resize: both; overflow: hidden; }
+  .fdialog { position: fixed; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); z-index: 100; width: 340px; max-width: 96vw; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
   .fdialog .top-actions { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
   .fdialog .top-actions button { flex: 1; padding: 6px; background: var(--bg-alt); border: none; border-right: 1px solid var(--border); cursor: pointer; font-size: 12px; }
   .fdialog .top-actions button:last-child { border-right: none; }
@@ -126,14 +126,14 @@
   .fdialog .tab { flex: 1; padding: 6px 4px; font-size: 11px; cursor: pointer; text-align: center; color: var(--text-dim); border-bottom: 2px solid transparent; }
   .fdialog .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--bg); }
   .fdialog .tab:hover { background: var(--bg-alt); }
-  .fdialog .body { flex: 1; overflow-y: auto; padding: 8px; min-height: 120px; display: flex; flex-direction: column; }
+  .fdialog .body { flex: 1; overflow-y: auto; padding: 8px; min-height: 200px; }
   .fdialog input[type=text], .fdialog input[type=number], .fdialog select { width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; }
-  .fdialog .vlist { font-size: 12px; }
-  .fdialog .vlist-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
+  .fdialog .vlist { font-size: 12px; overflow: auto; max-height: 320px; }
+  .fdialog .vlist-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; border-radius: 2px; width: max-content; min-width: 100%; box-sizing: border-box; }
   .fdialog .vlist-item:hover { background: var(--bg-alt); }
-  .fdialog .vlist-item input { margin: 0; }
-  .fdialog .vlist-item .count { margin-left: auto; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
-  .fdialog .vlist-item .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fdialog .vlist-item input { margin: 0; flex-shrink: 0; }
+  .fdialog .vlist-item .count { margin-left: auto; padding-left: 16px; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; flex-shrink: 0; }
+  .fdialog .vlist-item .val { white-space: nowrap; }
   .fdialog .vlist-item .val.null { font-style: italic; color: var(--text-faint); }
   .fdialog .footer { padding: 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; justify-content: flex-end; }
   .fdialog .footer button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; background: var(--bg); font-size: 12px; }
@@ -241,21 +241,24 @@
     background: var(--pv-h3);
     border-bottom: 2px solid var(--pv-border);
     display: flex;
-    flex-direction: column;
-    gap: 5px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    align-content: flex-start;
     flex-shrink: 0;
   }
   .pivot-report-filters .prf-row {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     font-size: 12px;
     color: #fff;
+    min-width: 0;
   }
   .pivot-report-filters .prf-label {
     font-weight: 600;
-    min-width: 110px;
     color: rgba(255,255,255,0.85);
+    white-space: nowrap;
   }
   .pivot-report-filters .prf-btn {
     border: 1px solid rgba(255,255,255,0.5);
@@ -374,12 +377,11 @@ const state = {
   pivot: {}, pivotData: null, pivotShape: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
-  settings: { lang: 'de', locale: 'de', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320, filterDlgWidth: 0, filterDlgHeight: 0 },
+  settings: { lang: 'de', locale: 'de', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
 };
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
 let _fdlgCloseHandler = null;
-let _fdlgResizeObserver = null;
 
 // Locale definitions used for both on-screen number formatting and Excel export.
 // The Excel LCID prefix (e.g. [$-407]) forces the number/date rendering to that
@@ -1174,7 +1176,7 @@ function renderFilterDialog(anchor) {
         tt('activeFilterNote', existingNonValues.type, filterSummary(existingNonValues))));
     }
     body.appendChild(el('input', { type:'text', class:'fdlg-search', placeholder: tt('searchValues'), oninput: (e) => { fdlg.search = e.target.value; renderValuesList(listWrap); } }));
-    var listWrap = el('div', { style:'margin-top:6px; flex:1 1 auto; min-height:0; display:flex; flex-direction:column;' });
+    var listWrap = el('div', { style:'margin-top:6px;' });
     body.appendChild(listWrap); renderValuesList(listWrap);
     if (fdlg.values && fdlg.valuesLoaded < fdlg.valuesTotal) {
       body.appendChild(el('button', { class:'btn btn-sm', style:'margin-top:6px; width:100%;', onclick: async (e) => { e.target.disabled = true; e.target.textContent = tt('loading'); await loadDistinctValues(fdlg.col, true); renderValuesList(listWrap); e.target.disabled = false; e.target.textContent = fdlg.valuesLoaded < fdlg.valuesTotal ? tt('loadMore', fdlg.valuesLoaded, fdlg.valuesTotal) : tt('allLoaded'); if (fdlg.valuesLoaded >= fdlg.valuesTotal) e.target.disabled = true; } }, tt('loadMore', fdlg.valuesLoaded||0, fdlg.valuesTotal||0)));
@@ -1202,21 +1204,12 @@ function renderFilterDialog(anchor) {
   dlg.appendChild(body);
   dlg.appendChild(el('div', { class: 'footer' }, el('button', { onclick: () => closeDialog() }, tt('cancel')), el('button', { class:'primary', onclick: () => applyFilterDialog() }, tt('ok'))));
   $('#dialog-root').appendChild(dlg);
-  // Restore a user-resized size (kept across tab re-renders via fdlg, and across sessions via settings).
-  const dlgW = fdlg.dlgWidth || state.settings.filterDlgWidth, dlgH = fdlg.dlgHeight || state.settings.filterDlgHeight;
-  if (dlgW) dlg.style.width = dlgW + 'px';
-  if (dlgH) dlg.style.height = dlgH + 'px';
-  const rect = anchor.getBoundingClientRect(), w = dlgW || 320;
-  dlg.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left)) + 'px'; dlg.style.top = Math.min(window.innerHeight - 200, rect.bottom + 4) + 'px';
-  if (_fdlgResizeObserver) { _fdlgResizeObserver.disconnect(); _fdlgResizeObserver = null; }
-  if (window.ResizeObserver) {
-    _fdlgResizeObserver = new ResizeObserver(() => {
-      if (!dlg.isConnected || !state.fdlg) return;
-      fdlg.dlgWidth = dlg.offsetWidth; fdlg.dlgHeight = dlg.offsetHeight;
-      state.settings.filterDlgWidth = fdlg.dlgWidth; state.settings.filterDlgHeight = fdlg.dlgHeight; scheduleSave();
-    });
-    _fdlgResizeObserver.observe(dlg);
-  }
+  // Position next to the anchor, then clamp so the whole dialog stays inside the viewport
+  // (measured from the real rendered size, so a tall list or a near-edge anchor never goes off-screen).
+  const rect = anchor.getBoundingClientRect(), dw = dlg.offsetWidth, dh = dlg.offsetHeight;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - dw - 8));
+  const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - dh - 8));
+  dlg.style.left = left + 'px'; dlg.style.top = top + 'px';
   if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler);
   _fdlgCloseHandler = (e) => { const live = document.querySelector('#dialog-root .fdialog'); if (!live || !live.contains(e.target)) closeDialog(); };
   setTimeout(() => document.addEventListener('mousedown', _fdlgCloseHandler), 0);
@@ -1292,7 +1285,7 @@ function renderValuesList(container) {
   }
 
   // ── Individual value rows ──
-  const scroll = el('div', { class:'vlist', style:'flex:1 1 auto; min-height:120px; max-height:none; overflow-y:auto;' });
+  const scroll = el('div', { class:'vlist' });
   for (const it of items) {
     const checked = fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value));
     scroll.appendChild(el('label', { class:'vlist-item' },
@@ -1353,7 +1346,7 @@ function applyFilterDialog() {
   if (finalFilter) state.filters[tn][col] = finalFilter; else delete state.filters[tn][col];
   state.page = 0; closeDialog(); refreshTableView();
 }
-function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler); _fdlgCloseHandler = null; if (_fdlgResizeObserver) { _fdlgResizeObserver.disconnect(); _fdlgResizeObserver = null; } $('#dialog-root').innerHTML = ''; state.fdlg = null; }
+function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler); _fdlgCloseHandler = null; $('#dialog-root').innerHTML = ''; state.fdlg = null; }
 
 // ============================================================
 // PIVOT MODE
@@ -2293,8 +2286,6 @@ async function restoreSession(prefs) {
     state.settings.rememberFiles = g.rememberFiles !== false;
     if (g.sidebarWidth) state.settings.sidebarWidth = g.sidebarWidth;
     if (g.pivotFieldsWidth) state.settings.pivotFieldsWidth = g.pivotFieldsWidth;
-    if (g.filterDlgWidth) state.settings.filterDlgWidth = g.filterDlgWidth;
-    if (g.filterDlgHeight) state.settings.filterDlgHeight = g.filterDlgHeight;
     if (g.pageSize) state.pageSize = g.pageSize;
     if (g.mode) state.mode = g.mode;
     if (typeof prefs.sqlText === 'string') state.sqlText = prefs.sqlText;
