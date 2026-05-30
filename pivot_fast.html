@@ -834,7 +834,12 @@ function buildWhere(table, filters) {
       else if (f.op === 'ends') textClause = `${c}::VARCHAR ILIKE ${qlit('%'+a)}`;
       else if (f.op === 'eq') textClause = `${c} = ${qlit(a)}`;
       else if (f.op === 'regex') textClause = `regexp_matches(${c}::VARCHAR, ${qlit(a)})`;
-      if (textClause) clauses.push(f.not ? `NOT (${textClause})` : textClause);
+      if (textClause) {
+        let clause = f.not ? `NOT (${textClause})` : textClause;
+        // keepNull: treat NULL/blank as a match (e.g. "!= X" should keep blanks, like pandas/Excel).
+        if (f.keepNull) clause = `(${clause} OR ${c} IS NULL)`;
+        clauses.push(clause);
+      }
     } else if (f.type === 'date') {
       const lit = (s) => `CAST(${qlit(s)} AS TIMESTAMP)`;
       if (f.op === 'between') clauses.push(`${c} BETWEEN ${lit(f.a)} AND ${lit(f.b)}`);
@@ -1394,8 +1399,8 @@ function renderPivotReportFilters() {
 //   funk_kenner != "True"  /  regio_kenner != "True"  →  text "not equals True"
 //   fn_planungshauptgruppe_pk in ("DP","ET")          →  values filter
 const PIVOT_PRESET_FILTERS = [
-  { col: 'funk_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true } },
-  { col: 'regio_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true } },
+  { col: 'funk_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true, keepNull: true } },
+  { col: 'regio_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true, keepNull: true } },
   { col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: ['DP', 'ET'] } },
 ];
 
@@ -1408,7 +1413,7 @@ function instantiatePresetFilter(p) {
 // True when a field's current filter is exactly the preset for that column.
 function isPresetFilter(f, p) {
   if (!f) return false;
-  if (p.filter.type === 'text') return f.type === 'text' && f.op === p.filter.op && String(f.a) === String(p.filter.a) && !!f.not === !!p.filter.not;
+  if (p.filter.type === 'text') return f.type === 'text' && f.op === p.filter.op && String(f.a) === String(p.filter.a) && !!f.not === !!p.filter.not && !!f.keepNull === !!p.filter.keepNull;
   if (p.filter.type === 'values') {
     if (f.type !== 'values' || !f.included) return false;
     const want = p.filter.included;
