@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && [ -f package.json ] && { npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund; } || true"
+          }
+        ]
+      }
+    ]
+  }
+}
