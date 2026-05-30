@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/idea.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -1699,101 +1699,213 @@ function openExportMenu(source) {
   $('#dialog-root').appendChild(menu); setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
-// ── Excel export (locale-aware number/date formatting via LCID prefix) ──
+// ── Excel export via ExcelJS (styling + native row/column outline grouping) ──
+// Locale-aware number/date formats are forced with an LCID prefix so the file
+// renders German (or US) regardless of the viewer's regional settings.
 function activeLocale() { return LOCALES[state.settings.locale] || LOCALES.de; }
 function numFmtCode(isInt) { const lc = activeLocale().lcid; return isInt ? `[$-${lc}]#,##0` : `[$-${lc}]#,##0.####`; }
 function dateFmtCode() { const loc = activeLocale(); return `[$-${loc.lcid}]${loc.dateTimeFmt}`; }
 
-// Walk the worksheet (skipping the header row) applying locale number/date formats.
-function applyCellFormats(ws) {
-  if (!ws['!ref']) return;
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = range.s.r + 1; R <= range.e.r; R++) {
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-      if (!cell) continue;
-      if (cell.t === 'n') cell.z = numFmtCode(Number.isInteger(cell.v));
-      else if (cell.t === 'd') cell.z = dateFmtCode();
-    }
-  }
+// Pivot header palette (matches the on-screen blue scale; darkest outermost).
+const XLSX_HDR = ['FF2E5FA3','FF4A7ABF','FF6D99D0','FF93B3DE','FFA8C0E4'];
+const xlsxHdrBg = (d) => XLSX_HDR[Math.min(Math.max(d, 0), XLSX_HDR.length - 1)];
+const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const thin = (argb = 'FFE2E8F0') => ({ style: 'thin', color: { argb } });
+const allBorders = (argb) => ({ top: thin(argb), left: thin(argb), bottom: thin(argb), right: thin(argb) });
+const sanitizeSheet = (n) => (n || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31) || 'Sheet1';
+
+function xlsxCellValue(v, kind) {
+  if (v === null || v === undefined) return null;
+  if (kind === 'date') { const d = v instanceof Date ? v : new Date(v); return isNaN(d.getTime()) ? String(v) : d; }
+  if (kind === 'num') return v;
+  return typeof v === 'object' ? JSON.stringify(v) : v;
 }
-function autoColWidths(aoa) {
-  const widths = [];
-  for (const row of aoa) row.forEach((v, i) => { const len = v == null ? 0 : String(v).length; widths[i] = Math.max(widths[i] || 0, len); });
-  return widths.map(w => ({ wch: Math.min(48, Math.max(10, w + 2)) }));
+function applyValueFormat(cell, kind) {
+  if (cell.value === null || cell.value === undefined) return;
+  if (kind === 'num' && typeof cell.value === 'number') { cell.numFmt = numFmtCode(Number.isInteger(cell.value)); cell.alignment = { horizontal: 'right' }; }
+  else if (kind === 'date' && cell.value instanceof Date) cell.numFmt = dateFmtCode();
 }
 
-function buildWorksheetFromRows(rows, columns) {
-  const aoa = [columns.map(c => c.name)];
+// Plain table/query export: bold frozen header, autofilter, locale formats, widths.
+function buildTableSheet(wb, name, rows, columns) {
+  const ws = wb.addWorksheet(sanitizeSheet(name), { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.addRow(columns.map(c => c.name));
+  const head = ws.getRow(1);
+  for (let i = 0; i < columns.length; i++) {
+    const c = head.getCell(i + 1);
+    c.fill = solid(xlsxHdrBg(0)); c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    c.alignment = { vertical: 'middle' }; c.border = allBorders('FF6D99D0');
+  }
   for (const r of rows) {
-    aoa.push(columns.map(c => {
-      const v = r[c.name];
-      if (v === null || v === undefined) return null;
-      if (c.kind === 'date') { const d = v instanceof Date ? v : new Date(v); return isNaN(d.getTime()) ? String(v) : d; }
-      if (c.kind === 'num') return v;                 // numbers stay numeric so Excel formats them
-      return typeof v === 'object' ? JSON.stringify(v) : v;
-    }));
+    const row = ws.addRow(columns.map(c => xlsxCellValue(r[c.name], c.kind)));
+    for (let i = 0; i < columns.length; i++) applyValueFormat(row.getCell(i + 1), columns[i].kind);
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
-  ws['!cols'] = autoColWidths(aoa);
-  applyCellFormats(ws);
-  return ws;
+  columns.forEach((c, i) => {
+    let w = c.name.length;
+    for (let k = 0; k < Math.min(rows.length, 200); k++) { const v = rows[k][c.name]; if (v != null) w = Math.max(w, String(v).length); }
+    ws.getColumn(i + 1).width = Math.min(48, Math.max(10, w + 2));
+  });
+  if (columns.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
 }
 
-// Render the *visible* pivot (subtotals, grand totals and all) into a worksheet matrix.
-function buildPivotWorksheet() {
-  const sh = state.pivotShape; if (!sh) return null;
-  const nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
+// Full, grouped, styled pivot. Rebuilds the shape fully-expanded (so every level
+// is present regardless of on-screen collapse state) and maps the hierarchy onto
+// native Excel row/column outline groups, mirroring the web pivot's drill-down.
+function buildPivotSheet(wb) {
+  const sh0 = state.pivotShape, pv = state.pivot[state.activeTable];
+  const effSub = pv.subtotals === 'off' ? 'top' : pv.subtotals;   // grouping needs summary rows to collapse into
+  const allExp = expandAll(pv);                                   // every node key from the (full) trees
+  const fullPv = { ...pv, subtotals: effSub, expanded: allExp.rows, colExpanded: allExp.cols };
+  const sh = buildPivotShape(sh0.rowDims, sh0.colDims, sh0.valueDefs, state.pivotData, fullPv);
+
+  const nValues = sh.valueDefs.length, D = sh.colDims.length, hasColDims = D > 0;
+  const leafCols = sh.leafCols;
+  const HEADER_ROWS = Math.max(1, D) + (nValues > 1 ? 1 : 0);
+  const dataStartRow = HEADER_ROWS + 1;
+  const firstDataCol = 2;
+  const leafColStart = (i) => firstDataCol + i * nValues;
+  const gtColStart = firstDataCol + leafCols.length * nValues;
   const valLabel = (vd) => `${vd.agg.replace('_', ' ')}(${vd.col})`;
-  const colPath = (col) => (col.vals && col.vals.length) ? col.vals.map(v => v === null || v === undefined ? '∅' : String(v)).join(' / ') : tt('total');
 
-  const header = [sh.rowDims.length ? sh.rowDims.join(' / ') : tt('total')];
-  for (const col of sh.leafCols) {
-    const label = col.isColSubtotal ? colPath(col) + ' ' + tt('total') : colPath(col);
-    for (const vd of sh.valueDefs) header.push(nValues > 1 ? `${label} · ${valLabel(vd)}` : label);
-  }
-  if (hasColDims) for (const vd of sh.valueDefs) header.push(nValues > 1 ? `${tt('grandTotal')} · ${valLabel(vd)}` : tt('grandTotal'));
+  const ws = wb.addWorksheet('Pivot');
 
-  const aoa = [header];
-  for (const entry of sh.flatRowOrder) {
-    const node = entry.node, isGrand = !!entry.isGrand;
-    const indent = isGrand ? '' : '    '.repeat(node.depth);
-    const row = [indent + (isGrand ? tt('grandTotal') : node.label)];
-    const rKey = isGrand ? '' : safeJoin(node.vals);
-    for (const leafCol of sh.leafCols) {
-      const cell = sh.cellMap.get(rKey + '#' + safeJoin(leafCol.vals));
-      for (let vi = 0; vi < nValues; vi++) { const v = cell ? cell[vi] : null; row.push(v === null || v === undefined ? null : v); }
+  const styleHeader = (cell, depth, bold = true) => {
+    cell.fill = solid(xlsxHdrBg(depth)); cell.font = { bold, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.alignment = { horizontal: 'left', vertical: 'middle' }; cell.border = allBorders('FF6D99D0');
+  };
+  const mergeLabel = (r1, c1, r2, c2, text, depth, bold) => {
+    if (r1 !== r2 || c1 !== c2) ws.mergeCells(r1, c1, r2, c2);
+    const cell = ws.getCell(r1, c1); cell.value = text; styleHeader(cell, depth, bold);
+  };
+
+  // ── top-left label corner ──
+  mergeLabel(1, 1, HEADER_ROWS, 1, sh.rowDims.join(' / '), 0, true);
+
+  // ── column headers ──
+  if (!hasColDims) {
+    mergeLabel(1, firstDataCol, nValues > 1 ? 1 : HEADER_ROWS, firstDataCol + nValues - 1, tt('grandTotal'), 0, true);
+  } else {
+    for (let lvl = 0; lvl < D; lvl++) {
+      let i = 0;
+      while (i < leafCols.length) {
+        const col = leafCols[i];
+        if (col.isColSubtotal && lvl === col.depth) {
+          mergeLabel(lvl + 1, leafColStart(i), lvl + (D - lvl), leafColStart(i) + nValues - 1, col.label + ' ' + tt('total'), col.depth + 1, true);
+          i++; continue;
+        }
+        if (col.isColSubtotal && lvl > col.depth) { i++; continue; }
+        if (!col.isColSubtotal && lvl >= col.vals.length) { i++; continue; }
+        let j = i;
+        while (j < leafCols.length) {
+          const nx = leafCols[j];
+          if (nx.isColSubtotal && lvl >= nx.depth) break;
+          if (!nx.isColSubtotal && lvl >= nx.vals.length) break;
+          if (String(nx.vals[lvl]) !== String(col.vals[lvl])) break;
+          j++;
+        }
+        const rs = (col.vals.length === lvl + 1) ? (D - lvl) : 1;
+        const raw = col.vals[lvl];
+        const label = (raw === undefined || raw === null || raw === 'null') ? '∅' : String(raw);
+        mergeLabel(lvl + 1, leafColStart(i), lvl + rs, leafColStart(j - 1) + nValues - 1, label, lvl, true);
+        i = j;
+      }
     }
-    if (hasColDims) { const gc = sh.cellMap.get(rKey + '#'); for (let vi = 0; vi < nValues; vi++) { const v = gc ? gc[vi] : null; row.push(v === null || v === undefined ? null : v); } }
-    aoa.push(row);
+    mergeLabel(1, gtColStart, D, gtColStart + nValues - 1, tt('grandTotal'), 0, true);
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = autoColWidths(aoa);
-  applyCellFormats(ws);
-  return ws;
+
+  // ── value-name sub-header (only when several value fields) ──
+  if (nValues > 1) {
+    const vr = HEADER_ROWS, deepest = Math.max(0, D - 1);
+    for (let i = 0; i < leafCols.length; i++) {
+      const depthBg = leafCols[i].isColSubtotal ? leafCols[i].depth + 1 : deepest;
+      for (let vi = 0; vi < nValues; vi++) { const c = ws.getCell(vr, leafColStart(i) + vi); c.value = valLabel(sh.valueDefs[vi]); styleHeader(c, depthBg, false); }
+    }
+    if (hasColDims) for (let vi = 0; vi < nValues; vi++) { const c = ws.getCell(vr, gtColStart + vi); c.value = valLabel(sh.valueDefs[vi]); styleHeader(c, 0, false); }
+  }
+
+  // ── data rows ──
+  let maxLabelLen = sh.rowDims.join(' / ').length;
+  let r = dataStartRow;
+  for (const entry of sh.flatRowOrder) {
+    const node = entry.node, isGrand = !!entry.isGrand, isSub = !!entry.isSubtotal;
+    const row = ws.getRow(r);
+    const depth = isGrand ? 0 : node.depth;
+
+    const lcell = row.getCell(1);
+    lcell.value = isGrand ? tt('grandTotal') : node.label;
+    lcell.alignment = { indent: isGrand ? 0 : Math.min(depth, 8), vertical: 'middle' };
+    lcell.border = allBorders();
+    if (isGrand) { lcell.fill = solid('FF8FAADC'); lcell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; }
+    else if (isSub) { lcell.fill = solid('FFDCE6F3'); lcell.font = { bold: depth === 0 }; }
+    else lcell.fill = solid('FFF5F8FC');
+    maxLabelLen = Math.max(maxLabelLen, String(lcell.value).length + depth * 2);
+    if (!isGrand) row.outlineLevel = Math.min(Math.max(depth, 0), 7);
+
+    const rKey = isGrand ? '' : safeJoin(node.vals);
+    const writeVal = (cell, v, isColSub) => {
+      if (v !== null && v !== undefined) { cell.value = v; if (typeof v === 'number') cell.numFmt = numFmtCode(Number.isInteger(v)); }
+      cell.alignment = { horizontal: 'right' }; cell.border = allBorders();
+      let fill = null, bold = false;
+      if (isGrand) { fill = 'FFB4C6E7'; bold = true; }
+      else if (isSub && isColSub) { fill = 'FFC8D8EE'; bold = true; }
+      else if (isColSub) { fill = 'FFDCE6F3'; bold = true; }
+      else if (isSub) { fill = 'FFEDF1F8'; bold = true; }
+      if (fill) cell.fill = solid(fill);
+      if (bold) cell.font = { bold: true };
+    };
+    for (let i = 0; i < leafCols.length; i++) {
+      const cell = sh.cellMap.get(rKey + '#' + safeJoin(leafCols[i].vals));
+      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(leafColStart(i) + vi), cell ? cell[vi] : null, !!leafCols[i].isColSubtotal);
+    }
+    if (hasColDims) {
+      const gc = sh.cellMap.get(rKey + '#');
+      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(gtColStart + vi), gc ? gc[vi] : null, true);
+    }
+    r++;
+  }
+
+  // ── column outline levels (collapse detail columns into their subtotal) ──
+  if (hasColDims) {
+    for (let i = 0; i < leafCols.length; i++) {
+      const lc = leafCols[i];
+      const lvl = lc.isColSubtotal ? lc.depth : Math.max(0, lc.vals.length - 1);
+      for (let vi = 0; vi < nValues; vi++) ws.getColumn(leafColStart(i) + vi).outlineLevel = Math.min(lvl, 7);
+    }
+    for (let vi = 0; vi < nValues; vi++) ws.getColumn(gtColStart + vi).outlineLevel = 0;
+  }
+
+  // ── widths, summary direction, freeze ──
+  ws.getColumn(1).width = Math.min(50, Math.max(18, maxLabelLen + 2));
+  const lastCol = gtColStart + (hasColDims ? nValues : 0) - 1;
+  for (let c = firstDataCol; c <= lastCol; c++) ws.getColumn(c).width = nValues > 1 ? 16 : 14;
+  try { ws.properties.outlineProperties = { summaryBelow: effSub === 'bottom', summaryRight: true }; } catch (_) {}
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: HEADER_ROWS }];
 }
 
 async function exportXlsx(source) {
-  if (typeof XLSX === 'undefined') { toast(tt('excelLoading'), true); return; }
+  if (typeof ExcelJS === 'undefined') { toast(tt('excelLoading'), true); return; }
   try {
-    let ws, sheetName, fileBase;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Parquet Explorer';
+    let fileBase = 'export';
     if (source === 'pivot') {
-      if (!state.pivotShape) { toast(tt('buildPivotFirst'), true); return; }
-      ws = buildPivotWorksheet(); sheetName = 'Pivot'; fileBase = (state.activeTable || 'pivot') + '_pivot';
+      if (!state.pivotShape || !state.pivotData) { toast(tt('buildPivotFirst'), true); return; }
+      buildPivotSheet(wb); fileBase = (state.activeTable || 'pivot') + '_pivot';
     } else if (source === 'sql') {
       if (!state.sqlResult) { toast(tt('runQueryFirst'), true); return; }
-      ws = buildWorksheetFromRows(state.sqlResult.rows, state.sqlResult.columns); sheetName = 'Query'; fileBase = 'query_result';
+      buildTableSheet(wb, 'Query', state.sqlResult.rows, state.sqlResult.columns); fileBase = 'query_result';
     } else {
       const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
       const filters = state.filters[tn] || {}, sort = state.sorts[tn];
       const cols = table.schema.filter(c => !state.hidden[tn].has(c.name));
       const sql = `SELECT ${cols.map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
       const res = await runQuery(sql);
-      ws = buildWorksheetFromRows(res.rows, cols); sheetName = tn; fileBase = tn;
+      buildTableSheet(wb, tn, res.rows, cols); fileBase = tn;
     }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, (sheetName || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31) || 'Sheet1');
-    XLSX.writeFile(wb, `${fileBase}_${Date.now()}.xlsx`, { bookType: 'xlsx', cellDates: true });
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = `${fileBase}_${Date.now()}.xlsx`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast(tt('exportedExcel', activeLocale().intl));
   } catch (e) { console.error(e); toast(tt('excelFailed', e.message), true); }
 }
