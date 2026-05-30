@@ -386,6 +386,8 @@ const state = {
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
 let _fdlgCloseHandler = null;
+// Close fn for the currently-open context menu (export/settings/session), so Esc can dismiss it.
+let _activePopupClose = null;
 
 // Locale definitions used for both on-screen number formatting and Excel export.
 // The Excel LCID prefix (e.g. [$-407]) forces the number/date rendering to that
@@ -442,6 +444,7 @@ const I18N = {
     autosaveOnTip: 'Ansicht & Dateien werden automatisch im Browser gespeichert', autosaveOffTip: 'Speichern ist deaktiviert — Klicken zum Aktivieren',
     sessionStatus: 'Status', statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
     confirmClear: 'Alle gespeicherten Ansichten und Dateien löschen? Geladene Tabellen bleiben in dieser Sitzung erhalten.',
+    removeTable: 'Tabelle entfernen', confirmRemoveTable: 'Tabelle „{0}" entfernen? Die geladene Datei wird verworfen.',
     rememberOn: 'Dateien werden in diesem Browser gespeichert', rememberOff: 'Gespeicherte Dateien gelöscht', clearedData: 'Gespeicherte Daten gelöscht',
     restored: '{0} Tabelle(n) aus der letzten Sitzung wiederhergestellt',
     exportedExcel: 'Excel exportiert ({0}-Format)', excelLoading: 'Excel-Bibliothek lädt noch — gleich erneut versuchen', excelFailed: 'Excel-Export fehlgeschlagen: {0}',
@@ -495,6 +498,7 @@ const I18N = {
     autosaveOnTip: 'View & files are saved automatically in this browser', autosaveOffTip: 'Saving is off — click to turn on',
     sessionStatus: 'Status', statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
     confirmClear: 'Forget all saved view settings and stored files? Loaded tables stay in this session.',
+    removeTable: 'Remove table', confirmRemoveTable: 'Remove table "{0}"? The loaded file will be discarded.',
     rememberOn: 'Files will be remembered in this browser', rememberOff: 'Stored files cleared', clearedData: 'Saved data cleared',
     restored: 'Restored {0} table(s) from your last session',
     exportedExcel: 'Exported Excel ({0} formatting)', excelLoading: 'Excel library still loading — try again in a moment', excelFailed: 'Excel export failed: {0}',
@@ -911,7 +915,7 @@ function renderAll() {
   for (const t of state.tables) {
     root.appendChild(el('div', { class: 'tb-table-item' + (t.name === state.activeTable ? ' active' : ''), onclick: () => { state.activeTable = t.name; renderAll(); refreshActiveView(); } },
       el('span', { style:'max-width:140px; overflow:hidden; text-overflow:ellipsis;', title: t.name }, t.name),
-      el('span', { class:'tb-table-remove', onclick: (e) => { e.stopPropagation(); dropTable(t.name); } }, '×')
+      el('span', { class:'tb-table-remove', title: tt('removeTable'), onclick: (e) => { e.stopPropagation(); if (confirm(tt('confirmRemoveTable', t.name))) dropTable(t.name); } }, '×')
     ));
   }
   
@@ -1353,6 +1357,16 @@ function applyFilterDialog() {
   state.page = 0; closeDialog(); refreshTableView();
 }
 function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler); _fdlgCloseHandler = null; $('#dialog-root').innerHTML = ''; state.fdlg = null; }
+
+// Keyboard: Esc dismisses the filter dialog or any open menu; Enter applies the filter dialog.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (state.fdlg) { closeDialog(); e.preventDefault(); }
+    else if (_activePopupClose) { _activePopupClose(); e.preventDefault(); }
+  } else if (e.key === 'Enter' && state.fdlg && (e.target.tagName || '').toLowerCase() !== 'textarea') {
+    applyFilterDialog(); e.preventDefault();
+  }
+});
 
 // ============================================================
 // PIVOT MODE
@@ -1927,8 +1941,9 @@ function renderSimpleGrid(rows, columns) {
 // EXPORT
 // ============================================================
 function openExportMenu(source) {
-  const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
+  const close = () => { _activePopupClose = null; $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
   const outside = (ev) => { if (!menu.contains(ev.target)) close(); };
+  _activePopupClose = close;
   const locLabel = (LOCALES[state.settings.locale] || LOCALES.de).intl === 'de-DE' ? 'DE' : 'US';
   const item = (label, fn, extra) => el('div', { class:'ctx-menu-item row', onclick: () => { close(); fn(); } }, el('span', null, label), extra || null);
   const menu = el('div', { class:'ctx-menu', style:'right:16px; bottom:40px; min-width:200px;' },
@@ -2193,9 +2208,9 @@ function buildRememberToggle() {
   );
 }
 function openMenu(anchor, menu) {
-  const close = () => { $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
+  const close = () => { _activePopupClose = null; $('#dialog-root').innerHTML = ''; document.removeEventListener('mousedown', outside); };
   const outside = (ev) => { if (!menu.contains(ev.target) && ev.target !== anchor) close(); };
-  menu._close = close;
+  menu._close = close; _activePopupClose = close;
   $('#dialog-root').appendChild(menu); setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
