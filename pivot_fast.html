@@ -119,7 +119,7 @@
   .pill .x { cursor: pointer; color: var(--text-dim); padding: 0 2px; }
   .pill .x:hover { color: var(--danger); }
   .grid-scroll { flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; position: relative; }
-  table.dgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  table.dgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; table-layout: fixed; }
   table.dgrid thead { position: sticky; top: 0; z-index: 5; }
   table.dgrid th { background: var(--header-bg); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border-strong); padding: 0; text-align: left; font-weight: 500; user-select: none; position: relative; white-space: nowrap; vertical-align: top; }
   table.dgrid th .th-inner { display: flex; align-items: center; padding: 6px 6px 6px 8px; gap: 4px; min-height: 26px; }
@@ -263,15 +263,32 @@
   }
   /* Report filter bar above pivot — matching pivot color scheme */
   .pivot-report-filters {
-    padding: 8px 14px;
+    padding: 6px 14px;
     background: var(--pv-h3);
     border-bottom: 2px solid var(--pv-border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .pivot-report-filters .prf-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    color: #fff;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .pivot-report-filters .prf-header .prf-chev { display: inline-flex; }
+  .pivot-report-filters .prf-header .prf-chev .icon { width: 14px; height: 14px; }
+  .pivot-report-filters .prf-body {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
     gap: 6px 20px;
     align-content: flex-start;
-    flex-shrink: 0;
   }
   .pivot-report-filters .prf-row {
     display: flex;
@@ -1012,7 +1029,9 @@ function renderTableMode() {
   const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid' }), visCols = table.schema.filter(c => !state.hidden[tn].has(c.name)), trHead = el('tr');
   for (const c of visCols) {
     const isSorted = sort && sort.col === c.name, hasFilter = !!filters[c.name], widthPx = state.colWidths[tn][c.name];
-    const th = el('th', { style: widthPx ? `width:${widthPx}px; min-width:${widthPx}px;` : null },
+    // table-layout is fixed, so every column needs an explicit width for resizing to stick.
+    const w = widthPx || (c.kind === 'num' ? 120 : c.kind === 'date' ? 150 : 170);
+    const th = el('th', { style: `width:${w}px; min-width:${w}px; max-width:${w}px;` },
       el('div', { class: 'th-inner' },
         el('div', { class: 'col-name', onclick: () => toggleSort(c.name), title: c.name }, c.name, el('span', { class: 'col-type' }, kindLabel(c.kind))),
         isSorted ? el('span', { class: 'sort-ind' }, sort.dir==='asc'?'▲':'▼') : null,
@@ -1074,7 +1093,7 @@ function toggleSort(col) {
 }
 function startResize(e, th, colName, tableName) {
   e.preventDefault(); const startX = e.clientX, startWidth = th.getBoundingClientRect().width;
-  const onMove = (mv) => { const w = Math.max(40, startWidth + mv.clientX - startX); state.colWidths[tableName][colName] = Math.round(w); th.style.width = w + 'px'; th.style.minWidth = w + 'px'; };
+  const onMove = (mv) => { const w = Math.max(40, startWidth + mv.clientX - startX); state.colWidths[tableName][colName] = Math.round(w); th.style.width = th.style.minWidth = th.style.maxWidth = w + 'px'; };
   const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); scheduleSave(); };
   document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
 }
@@ -1482,7 +1501,14 @@ function openPivotFilterDialog(filterItem, anchor) {
 function renderPivotReportFilters() {
   const pv = state.pivot[state.activeTable];
   if (!pv.filters || pv.filters.length === 0) return null;
+  const collapsed = !!pv._rfCollapsed;
   const wrap = el('div', { class: 'pivot-report-filters' });
+  wrap.appendChild(el('div', { class: 'prf-header', onclick: () => { pv._rfCollapsed = !collapsed; renderContent(); } },
+    el('span', { class: 'prf-chev', html: collapsed ? ICONS.chevRight : ICONS.chevDown }),
+    el('span', null, tt('tileFilters') + ' (' + pv.filters.length + ')')
+  ));
+  if (collapsed) return wrap;
+  const body = el('div', { class: 'prf-body' });
   for (const f of pv.filters) {
     let filterText = tt('allFilter');
     if (f.filter) {
@@ -1493,7 +1519,7 @@ function renderPivotReportFilters() {
       } else filterText = tt('custom');
     }
     const hasActiveFilter = !!f.filter;
-    wrap.appendChild(el('div', { class: 'prf-row' },
+    body.appendChild(el('div', { class: 'prf-row' },
       el('span', { class: 'prf-label' }, f.col + ':'),
       el('div', { class: 'prf-btn', onclick: (e) => openPivotFilterDialog(f, e.currentTarget) },
         el('span', null, filterText),
@@ -1501,6 +1527,7 @@ function renderPivotReportFilters() {
       )
     ));
   }
+  wrap.appendChild(body);
   return wrap;
 }
 
