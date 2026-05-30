@@ -1618,30 +1618,80 @@ function renderPivotGrid() {
   const sh = state.pivotShape, pv = state.pivot[state.activeTable], nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
   const table = el('table', { class:'pgrid' }), colHeaderRows = Math.max(1, sh.colDims.length), thead = el('thead');
   const showAs = pv.showAs || 'abs';
-  const grandCellAll = sh.cellMap.get('#');
+  const cellMap = sh.cellMap;
+  const grandCellAll = cellMap.get('#');
 
-  // Format one value cell honoring the "Show values as" mode. rKey/cKey identify the cell;
-  // the relevant total is read straight from the ROLLUP rows already present in cellMap.
+  // Ratio (e.g. 0.123) for one absolute value under the active "Show values as" mode, or null when
+  // there is no meaningful base. rKey/cKey identify the cell; the relevant total is read straight
+  // from the ROLLUP rows already present in cellMap.
+  const ratioFor = (absVal, vi, rKey, cKey) => {
+    if (absVal === null || absVal === undefined) return null;
+    let base = null;
+    if (showAs === 'pctRow') { const b = cellMap.get(rKey + '#'); base = b ? b[vi] : null; }
+    else if (showAs === 'pctCol') { const b = cellMap.get('#' + cKey); base = b ? b[vi] : null; }
+    else { base = grandCellAll ? grandCellAll[vi] : null; } // pctGrand
+    if (base === null || base === undefined || Number(base) === 0) return null;
+    return Number(absVal) / Number(base);
+  };
+
+  // Format one value cell ("Absolute" shows the raw number, otherwise the relative percentage).
   const cellText = (cell, vi, rKey, cKey) => {
     const v = cell ? cell[vi] : null;
     if (v === null || v === undefined) return '';
     if (showAs === 'abs') return fmtNum(v);
-    let base = null;
-    if (showAs === 'pctRow') { const b = sh.cellMap.get(rKey + '#'); base = b ? b[vi] : null; }
-    else if (showAs === 'pctCol') { const b = sh.cellMap.get('#' + cKey); base = b ? b[vi] : null; }
-    else { base = grandCellAll ? grandCellAll[vi] : null; } // pctGrand
-    if (base === null || base === undefined || Number(base) === 0) return '';
-    return fmtPct(Number(v) / Number(base));
+    const r = ratioFor(v, vi, rKey, cKey);
+    return r === null ? '' : fmtPct(r);
   };
 
-  // A leaf data row is hidden when its share of the grand total (first value field) is below the threshold.
-  const rowBelowThreshold = (rKey) => {
-    if (!pv.hideBelowPct) return false;
-    const rt = sh.cellMap.get(rKey + '#'), gv = grandCellAll ? Number(grandCellAll[0]) : null;
-    if (rt === undefined || gv === null || gv === 0) return false;
-    const rv = Number(rt[0]);
-    if (!isFinite(rv)) return false;
-    return Math.abs(rv / gv) < PIVOT_HIDE_THRESHOLD;
+  // "< 1%" pruning. A row/group is KEPT when at least one of its displayed cells reaches the
+  // threshold (so a small row that is ≥1% within some column stays). In Absolute mode there is no
+  // percentage, so we fall back to the row's share of the grand total. Anything below is pruned
+  // together with its whole subtree, at every level. Pruned subtrees are remembered so total rows
+  // can show the real leftover instead of 100%.
+  const hiddenRowKeys = new Set();
+  const prunedRoots = [];
+  if (pv.hideBelowPct) {
+    const grandV0 = grandCellAll ? Math.abs(Number(grandCellAll[0])) : 0;
+    const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
+    const nodeKeeps = (n) => {
+      const rKey = safeJoin(n.vals);
+      if (showAs === 'abs') {
+        if (!grandV0) return true;
+        const t = cellMap.get(rKey + '#');
+        return t ? Math.abs(Number(t[0])) / grandV0 >= PIVOT_HIDE_THRESHOLD : true;
+      }
+      for (const leafCol of sh.leafCols) {
+        const cKey = safeJoin(leafCol.vals), cell = cellMap.get(rKey + '#' + cKey);
+        if (!cell) continue;
+        for (let vi = 0; vi < nValues; vi++) {
+          const r = ratioFor(cell[vi], vi, rKey, cKey);
+          if (r !== null && Math.abs(r) >= PIVOT_HIDE_THRESHOLD) return true;
+        }
+      }
+      return false;
+    };
+    const walkHide = (nodes) => {
+      for (const n of nodes) {
+        if (nodeKeeps(n)) walkHide(n.children);
+        else { prunedRoots.push(n); markSubtree(n); }
+      }
+    };
+    walkHide(sh.rowTree);
+  }
+
+  // Absolute totals for a total/subtotal/grand row with the pruned rows removed (full total minus
+  // every pruned subtree that falls under this node), so totals reflect only the still-visible rows.
+  const visibleTotal = (node, rKey, cKey) => {
+    const full = cellMap.get(rKey + '#' + cKey);
+    if (!full || prunedRoots.length === 0) return full;
+    const out = Array.prototype.map.call(full, Number);
+    const nodeKey = node.key; // '__root' for the grand-total row
+    for (const pr of prunedRoots) {
+      if (nodeKey !== '__root' && pr.key !== nodeKey && !pr.key.startsWith(nodeKey + '|')) continue;
+      const sub = cellMap.get(safeJoin(pr.vals) + '#' + cKey);
+      if (sub) for (let vi = 0; vi < nValues; vi++) { const s = Number(sub[vi]); if (isFinite(s)) out[vi] -= s; }
+    }
+    return out;
   };
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
@@ -1714,8 +1764,8 @@ function renderPivotGrid() {
       rowStyle = '';
     }
 
-    // Hide long-tail leaf rows (only actual data leaves; subtotals and the grand total stay).
-    if (!isGrand && !isSubtotal && node.children.length === 0 && rowBelowThreshold(safeJoin(node.vals))) continue;
+    // Hide long-tail rows/groups (the grand total always stays).
+    if (!isGrand && hiddenRowKeys.has(node.key)) continue;
 
     // "Automotive Total" → "Automotive" (no suffix); label font weight: bold only at depth 0
     const labelStr = isGrand
@@ -1732,8 +1782,10 @@ function renderPivotGrid() {
     tr.appendChild(labelTd);
 
     const rKey = isGrand ? '' : safeJoin(node.vals);
+    const isTotalRow = isGrand || isSubtotal; // total rows show the leftover after pruning
     for (const leafCol of sh.leafCols) {
-      const cKey = safeJoin(leafCol.vals), cell = sh.cellMap.get(rKey + '#' + cKey);
+      const cKey = safeJoin(leafCol.vals);
+      const cell = isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
       const isColSub = !!leafCol.isColSubtotal;
       let cellStyle = '';
       if (isGrand) {
@@ -1748,7 +1800,7 @@ function renderPivotGrid() {
       for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: cellStyle }, cellText(cell, vi, rKey, cKey))); }
     }
     if (hasColDims) {
-      const grandCell = sh.cellMap.get(rKey + '#');
+      const grandCell = isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#');
       for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:#b4c6e7; font-weight:700; border-left:2px solid var(--pv-border);' : 'background:#dce6f3; font-weight:600; border-left:2px solid var(--pv-border);' }, cellText(grandCell, vi, rKey, ''))); }
     }
     tbody.appendChild(tr);
