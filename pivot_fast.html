@@ -168,6 +168,8 @@
   .pivot-toolbar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg-alt); align-items: center; font-size: 12px; flex-shrink: 0; }
   .pivot-toolbar button { padding: 3px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 11px; }
   .pivot-toolbar button:hover { background: var(--bg-alt2); }
+  .pivot-toolbar button.preset-on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pivot-toolbar button.preset-on:hover { background: var(--accent); filter: brightness(1.08); }
   /* Pivot grid */
   table.pgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
   table.pgrid thead { position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--pv-border); }
@@ -411,6 +413,8 @@ const I18N = {
     tileFilters: 'Filter', tileColumns: 'Spalten', tileRows: 'Zeilen', tileValues: 'Σ Werte',
     subtotals: 'Zwischensummen:', stTop: 'oben', stBottom: 'unten', stOff: 'aus',
     expandAll: 'Alle aufklappen', collapseAll: 'Alle zuklappen', clear: 'Leeren',
+    presetFilter: 'Standardfilter', presetFilterTitle: 'Standardfilter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
+    presetApplied: 'Standardfilter gesetzt ({0} Felder)', presetCleared: 'Standardfilter entfernt', presetNoCols: 'Keine passenden Spalten für den Standardfilter gefunden',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
     allFilter: '(Alle)', multipleItems: '(Mehrere Elemente)', custom: '(Benutzerdefiniert)',
@@ -459,6 +463,8 @@ const I18N = {
     tileFilters: 'Filters', tileColumns: 'Columns', tileRows: 'Rows', tileValues: 'Σ Values',
     subtotals: 'Subtotals:', stTop: 'top', stBottom: 'bottom', stOff: 'off',
     expandAll: 'Expand All', collapseAll: 'Collapse All', clear: 'Clear',
+    presetFilter: 'Standard filter', presetFilterTitle: 'Apply standard filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
+    presetApplied: 'Standard filter applied ({0} fields)', presetCleared: 'Standard filter cleared', presetNoCols: 'No matching columns for the standard filter',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
     allFilter: '(All)', multipleItems: '(Multiple Items)', custom: '(Custom)',
@@ -1383,14 +1389,88 @@ function renderPivotReportFilters() {
   return wrap;
 }
 
+// Pre-selected pivot filter set. Expressed with the app's own filter types so the
+// resulting chips remain fully editable through the standard filter dialog.
+//   funk_kenner != "True"  /  regio_kenner != "True"  →  text "not equals True"
+//   fn_planungshauptgruppe_pk in ("DP","ET")          →  values filter
+const PIVOT_PRESET_FILTERS = [
+  { col: 'funk_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true } },
+  { col: 'regio_kenner', filter: { type: 'text', op: 'eq', a: 'True', not: true } },
+  { col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: ['DP', 'ET'] } },
+];
+
+function instantiatePresetFilter(p) {
+  return p.filter.type === 'values'
+    ? { type: 'values', included: new Set(p.filter.included) }
+    : { ...p.filter };
+}
+
+// True when a field's current filter is exactly the preset for that column.
+function isPresetFilter(f, p) {
+  if (!f) return false;
+  if (p.filter.type === 'text') return f.type === 'text' && f.op === p.filter.op && String(f.a) === String(p.filter.a) && !!f.not === !!p.filter.not;
+  if (p.filter.type === 'values') {
+    if (f.type !== 'values' || !f.included) return false;
+    const want = p.filter.included;
+    return f.included.size === want.length && want.every(v => f.included.has(v));
+  }
+  return false;
+}
+
+function presetApplicable(pv) {
+  const table = state.tables.find(t => t.name === state.activeTable);
+  const cols = new Set((table?.schema || []).map(c => c.name));
+  return PIVOT_PRESET_FILTERS.filter(p => cols.has(p.col));
+}
+
+function fieldForCol(pv, col) {
+  return [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values].find(f => f.col === col);
+}
+
+// The toggle reads as "on" when every applicable preset column carries its preset filter.
+function isPresetActive(pv) {
+  const applicable = presetApplicable(pv);
+  if (applicable.length === 0) return false;
+  return applicable.every(p => isPresetFilter(fieldForCol(pv, p.col), p));
+}
+
+function togglePivotPreset() {
+  const pv = state.pivot[state.activeTable];
+  if (!pv) return;
+  const applicable = presetApplicable(pv);
+  if (applicable.length === 0) { toast(tt('presetNoCols'), true); return; }
+  if (isPresetActive(pv)) {
+    // Turn off: clear the preset filter wherever the column lives, and drop any
+    // chip we had to add to the Filters tile purely to host it.
+    for (const p of applicable) {
+      const inFilters = pv.filters.find(f => f.col === p.col);
+      const elsewhere = [...pv.rows, ...pv.cols, ...pv.values].find(f => f.col === p.col);
+      if (inFilters && !elsewhere) pv.filters = pv.filters.filter(f => f.col !== p.col);
+      else { const f = fieldForCol(pv, p.col); if (f) f.filter = null; }
+    }
+    toast(tt('presetCleared'));
+  } else {
+    // Turn on: set the preset filter on an existing placement, or add it to Filters.
+    for (const p of applicable) {
+      const existing = fieldForCol(pv, p.col);
+      if (existing) existing.filter = instantiatePresetFilter(p);
+      else pv.filters.push({ col: p.col, filter: instantiatePresetFilter(p) });
+    }
+    toast(tt('presetApplied', applicable.length));
+  }
+  refreshPivotView();
+}
+
 function renderPivotToolbar() {
   const pv = state.pivot[state.activeTable];
   const stLabels = { top: tt('stTop'), bottom: tt('stBottom'), off: tt('stOff') };
+  const presetOn = isPresetActive(pv);
   return el('div', { class:'pivot-toolbar' },
     el('span', null, tt('subtotals')), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, stLabels[o]))),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
     el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, tt('clear')),
+    el('button', { class: presetOn ? 'preset-on' : '', title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() }, (presetOn ? '✓ ' : '') + tt('presetFilter')),
     el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
 }
