@@ -168,8 +168,13 @@
   .pivot-toolbar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg-alt); align-items: center; font-size: 12px; flex-shrink: 0; }
   .pivot-toolbar button { padding: 3px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 11px; }
   .pivot-toolbar button:hover { background: var(--bg-alt2); }
+  .pivot-toolbar button.preset-btn { display: inline-flex; align-items: center; gap: 4px; }
+  .pivot-toolbar .btn-ico { display: inline-flex; }
+  .pivot-toolbar .btn-ico .icon { width: 12px; height: 12px; }
   .pivot-toolbar button.preset-on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .pivot-toolbar button.preset-on:hover { background: var(--accent); filter: brightness(1.08); }
+  .pivot-toolbar .pv-hide-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; user-select: none; }
+  .pivot-toolbar .pv-hide-toggle input { margin: 0; }
   /* Pivot grid */
   table.pgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
   table.pgrid thead { position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--pv-border); }
@@ -413,8 +418,10 @@ const I18N = {
     tileFilters: 'Filter', tileColumns: 'Spalten', tileRows: 'Zeilen', tileValues: 'Σ Werte',
     subtotals: 'Zwischensummen:', stTop: 'oben', stBottom: 'unten', stOff: 'aus',
     expandAll: 'Alle aufklappen', collapseAll: 'Alle zuklappen', clear: 'Leeren',
-    presetFilter: 'Standardfilter', presetFilterTitle: 'Standardfilter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
-    presetApplied: 'Standardfilter gesetzt ({0} Felder)', presetCleared: 'Standardfilter entfernt', presetNoCols: 'Keine passenden Spalten für den Standardfilter gefunden',
+    presetFilter: 'PKS Filter', presetFilterTitle: 'PKS Filter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
+    presetApplied: 'PKS Filter gesetzt ({0} Felder)', presetCleared: 'PKS Filter entfernt', presetNoCols: 'Keine passenden Spalten für den PKS Filter gefunden',
+    showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
+    hideBelow: '< 1 % ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter 1 % liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
     allFilter: '(Alle)', multipleItems: '(Mehrere Elemente)', custom: '(Benutzerdefiniert)',
@@ -463,8 +470,10 @@ const I18N = {
     tileFilters: 'Filters', tileColumns: 'Columns', tileRows: 'Rows', tileValues: 'Σ Values',
     subtotals: 'Subtotals:', stTop: 'top', stBottom: 'bottom', stOff: 'off',
     expandAll: 'Expand All', collapseAll: 'Collapse All', clear: 'Clear',
-    presetFilter: 'Standard filter', presetFilterTitle: 'Apply standard filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
-    presetApplied: 'Standard filter applied ({0} fields)', presetCleared: 'Standard filter cleared', presetNoCols: 'No matching columns for the standard filter',
+    presetFilter: 'PKS Filter', presetFilterTitle: 'Apply PKS filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
+    presetApplied: 'PKS filter applied ({0} fields)', presetCleared: 'PKS filter cleared', presetNoCols: 'No matching columns for the PKS filter',
+    showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
+    hideBelow: 'Hide < 1%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below 1%',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
     allFilter: '(All)', multipleItems: '(Multiple Items)', custom: '(Custom)',
@@ -582,6 +591,7 @@ function serializePivot(pv) {
   return {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
     expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals,
+    showAs: pv.showAs, hideBelowPct: pv.hideBelowPct,
   };
 }
 function deserializePivot(s) {
@@ -590,6 +600,7 @@ function deserializePivot(s) {
   const pv = {
     filters: (s.filters || []).map(field), cols: (s.cols || []).map(field), rows: (s.rows || []).map(field), values: (s.values || []).map(field),
     expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top',
+    showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct,
   };
   // Pre-seed the dimension signature so the first refresh keeps the restored expand state
   // instead of treating it as a fresh dimension change and re-expanding everything.
@@ -808,7 +819,7 @@ function sanitizeTableName(filename, existing) {
   if (!base || /^\d/.test(base)) base = 't_' + base;
   let n = base, i = 1; while (existing.includes(n)) n = base + '_' + (++i); return n;
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top' }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false }; }
 
 // FILTER -> SQL
 function buildWhere(table, filters) {
@@ -1470,12 +1481,19 @@ function renderPivotToolbar() {
   const pv = state.pivot[state.activeTable];
   const stLabels = { top: tt('stTop'), bottom: tt('stBottom'), off: tt('stOff') };
   const presetOn = isPresetActive(pv);
+  const showAsOpts = [['abs', tt('saAbs')], ['pctRow', tt('saPctRow')], ['pctCol', tt('saPctCol')], ['pctGrand', tt('saPctGrand')]];
   return el('div', { class:'pivot-toolbar' },
     el('span', null, tt('subtotals')), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, stLabels[o]))),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
     el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, tt('clear')),
-    el('button', { class: presetOn ? 'preset-on' : '', title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() }, (presetOn ? '✓ ' : '') + tt('presetFilter')),
+    el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
+      el('span', { class:'btn-ico', html: presetOn ? ICONS.funnelFilled : ICONS.funnel }), tt('presetFilter')),
+    el('span', { style:'border-left:1px solid var(--border); align-self:stretch; margin:0 2px;' }),
+    el('span', null, tt('showAs')),
+    el('select', { class:'agg-select', title: tt('showAs'), onchange: (e) => { pv.showAs = e.target.value; renderContent(); scheduleSave(); } }, showAsOpts.map(([v,l]) => el('option', { value:v, selected: pv.showAs===v?'':null }, l))),
+    el('label', { class:'pv-hide-toggle', title: tt('hideBelowTitle') },
+      el('input', { type:'checkbox', checked: pv.hideBelowPct ? '' : null, onchange: (e) => { pv.hideBelowPct = e.target.checked; renderContent(); scheduleSave(); } }), tt('hideBelow')),
     el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
 }
@@ -1594,9 +1612,37 @@ function getColNode(nodes, key) {
 const PV_HEADER_COLORS = ['#2e5fa3','#4a7abf','#6d99d0','#93b3de','#a8c0e4'];
 function pvHdrBg(depth) { return PV_HEADER_COLORS[Math.min(depth, PV_HEADER_COLORS.length - 1)]; }
 
+const PIVOT_HIDE_THRESHOLD = 0.01; // rows contributing < 1% of the grand total are hidden when the toggle is on
+
 function renderPivotGrid() {
   const sh = state.pivotShape, pv = state.pivot[state.activeTable], nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
   const table = el('table', { class:'pgrid' }), colHeaderRows = Math.max(1, sh.colDims.length), thead = el('thead');
+  const showAs = pv.showAs || 'abs';
+  const grandCellAll = sh.cellMap.get('#');
+
+  // Format one value cell honoring the "Show values as" mode. rKey/cKey identify the cell;
+  // the relevant total is read straight from the ROLLUP rows already present in cellMap.
+  const cellText = (cell, vi, rKey, cKey) => {
+    const v = cell ? cell[vi] : null;
+    if (v === null || v === undefined) return '';
+    if (showAs === 'abs') return fmtNum(v);
+    let base = null;
+    if (showAs === 'pctRow') { const b = sh.cellMap.get(rKey + '#'); base = b ? b[vi] : null; }
+    else if (showAs === 'pctCol') { const b = sh.cellMap.get('#' + cKey); base = b ? b[vi] : null; }
+    else { base = grandCellAll ? grandCellAll[vi] : null; } // pctGrand
+    if (base === null || base === undefined || Number(base) === 0) return '';
+    return fmtPct(Number(v) / Number(base));
+  };
+
+  // A leaf data row is hidden when its share of the grand total (first value field) is below the threshold.
+  const rowBelowThreshold = (rKey) => {
+    if (!pv.hideBelowPct) return false;
+    const rt = sh.cellMap.get(rKey + '#'), gv = grandCellAll ? Number(grandCellAll[0]) : null;
+    if (rt === undefined || gv === null || gv === 0) return false;
+    const rv = Number(rt[0]);
+    if (!isFinite(rv)) return false;
+    return Math.abs(rv / gv) < PIVOT_HIDE_THRESHOLD;
+  };
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
@@ -1668,6 +1714,9 @@ function renderPivotGrid() {
       rowStyle = '';
     }
 
+    // Hide long-tail leaf rows (only actual data leaves; subtotals and the grand total stay).
+    if (!isGrand && !isSubtotal && node.children.length === 0 && rowBelowThreshold(safeJoin(node.vals))) continue;
+
     // "Automotive Total" → "Automotive" (no suffix); label font weight: bold only at depth 0
     const labelStr = isGrand
       ? tt('grandTotal')
@@ -1696,11 +1745,11 @@ function renderPivotGrid() {
       } else if (isSubtotal) {
         cellStyle = 'background:var(--pv-sub-row); font-weight:600;';
       }
-      for (let vi = 0; vi < sh.valueDefs.length; vi++) { const v = cell ? cell[vi] : null; tr.appendChild(el('td', { style: cellStyle }, v === null || v === undefined ? '' : fmtNum(v))); }
+      for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: cellStyle }, cellText(cell, vi, rKey, cKey))); }
     }
     if (hasColDims) {
       const grandCell = sh.cellMap.get(rKey + '#');
-      for (let vi = 0; vi < sh.valueDefs.length; vi++) { const v = grandCell ? grandCell[vi] : null; tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:#b4c6e7; font-weight:700; border-left:2px solid var(--pv-border);' : 'background:#dce6f3; font-weight:600; border-left:2px solid var(--pv-border);' }, v === null || v === undefined ? '' : fmtNum(v))); }
+      for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:#b4c6e7; font-weight:700; border-left:2px solid var(--pv-border);' : 'background:#dce6f3; font-weight:600; border-left:2px solid var(--pv-border);' }, cellText(grandCell, vi, rKey, ''))); }
     }
     tbody.appendChild(tr);
   }
@@ -1709,17 +1758,24 @@ function renderPivotGrid() {
 
 // Number formatters follow the active locale so the whole grid stays consistent
 // (German: 1.234.567,89 — English US: 1,234,567.89). Rebuilt when the locale changes.
-let NUM_FMT_INT, NUM_FMT_DEC, NUM_FMT_CELL;
+let NUM_FMT_INT, NUM_FMT_DEC, NUM_FMT_CELL, NUM_FMT_PCT;
 function rebuildNumberFormats() {
   const loc = (LOCALES[state.settings.locale] || LOCALES.de).intl;
   NUM_FMT_INT  = new Intl.NumberFormat(loc);
   NUM_FMT_DEC  = new Intl.NumberFormat(loc, { maximumFractionDigits: 4 });
   NUM_FMT_CELL = new Intl.NumberFormat(loc, { maximumFractionDigits: 6 });
+  NUM_FMT_PCT  = new Intl.NumberFormat(loc, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 rebuildNumberFormats();
 function fmtNum(v) {
   if (typeof v !== 'number') return String(v);
   return Number.isInteger(v) ? NUM_FMT_INT.format(v) : NUM_FMT_DEC.format(v);
+}
+// Format a ratio (e.g. 0.123) as a locale-aware percentage (e.g. "12,3 %").
+function fmtPct(ratio) {
+  if (typeof ratio !== 'number' || !isFinite(ratio)) return '';
+  if (!NUM_FMT_PCT) NUM_FMT_PCT = new Intl.NumberFormat((LOCALES[state.settings.locale] || LOCALES.de).intl, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return NUM_FMT_PCT.format(ratio);
 }
 
 // ============================================================
