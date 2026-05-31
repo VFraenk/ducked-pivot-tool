@@ -158,6 +158,11 @@
   .fdialog .vlist-item .count { margin-left: auto; padding-left: 24px; text-align: right; color: var(--text-faint); font-size: 11px; font-family: ui-monospace, Menlo, monospace; flex-shrink: 0; }
   .fdialog .vlist-item .val { white-space: nowrap; }
   .fdialog .vlist-item .val.null { font-style: italic; color: var(--text-faint); }
+  .fdialog .vlist-item .vlist-grip { cursor: grab; color: var(--text-faint); font-size: 12px; line-height: 1; flex-shrink: 0; user-select: none; }
+  .fdialog .vlist-item .vlist-grip:active { cursor: grabbing; }
+  .fdialog .vlist-item.dragging { opacity: .45; }
+  .fdialog .vlist-item.drag-over-before { box-shadow: inset 0 2px 0 var(--accent); }
+  .fdialog .vlist-item.drag-over-after { box-shadow: inset 0 -2px 0 var(--accent); }
   .fdialog .footer { padding: 8px; border-top: 1px solid var(--border); display: flex; gap: 6px; justify-content: flex-end; }
   .fdialog .footer button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; background: var(--bg); font-size: 12px; }
   .fdialog .footer button.primary { background: var(--accent); color: white; border-color: var(--accent); }
@@ -463,6 +468,7 @@ const I18N = {
     cancel: 'Abbrechen', ok: 'OK', excludeNot: 'Ausschließen (NICHT)',
     activeFilterNote: 'Aktiver {0}-Filter: {1}. Nur passende Werte sind unten vorausgewählt.',
     measureNote: 'Zahlen = Σ {0}',
+    dragToOrder: 'Zum Sortieren ziehen (⠿)',
     opGt: '>', opGe: '≥', opLt: '<', opLe: '≤', opEq: '=', opNe: '≠', opBetween: 'zwischen', opTopN: 'Top N',
     valuePh: 'Wert', upperPh: 'Obergrenze', topNPh: 'N (z. B. 10)',
     dAfter: 'nach', dOnAfter: 'am oder nach', dBefore: 'vor', dOnBefore: 'am oder vor', dEquals: 'gleich',
@@ -519,6 +525,7 @@ const I18N = {
     cancel: 'Cancel', ok: 'OK', excludeNot: 'Exclude (NOT)',
     activeFilterNote: 'Active {0} filter: {1}. Only matching values are pre-selected below.',
     measureNote: 'Numbers = Σ {0}',
+    dragToOrder: 'Drag to reorder (⠿)',
     opGt: '>', opGe: '≥', opLt: '<', opLe: '≤', opEq: '=', opNe: '≠', opBetween: 'between', opTopN: 'top N',
     valuePh: 'value', upperPh: 'upper bound', topNPh: 'N (e.g. 10)',
     dAfter: 'after', dOnAfter: 'on or after', dBefore: 'before', dOnBefore: 'on or before', dEquals: 'equals',
@@ -652,6 +659,7 @@ function serializePivot(pv) {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
     expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals,
     showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, rowSort: pv.rowSort, colSort: pv.colSort,
+    memberOrder: pv.memberOrder || {},
   };
 }
 function deserializePivot(s) {
@@ -662,6 +670,7 @@ function deserializePivot(s) {
     expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top',
     showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct,
     rowSort: s.rowSort || { by: 'label', dir: 'asc' }, colSort: s.colSort || { by: 'label', dir: 'asc' },
+    memberOrder: s.memberOrder || {},
   };
   // Pre-seed the dimension signature so the first refresh keeps the restored expand state
   // instead of treating it as a fresh dimension change and re-expanding everything.
@@ -880,7 +889,7 @@ function sanitizeTableName(filename, existing) {
   if (!base || /^\d/.test(base)) base = 't_' + base;
   let n = base, i = 1; while (existing.includes(n)) n = base + '_' + (++i); return n;
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' } }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
 
 // FILTER -> SQL
 function buildWhere(table, filters) {
@@ -1215,7 +1224,14 @@ async function loadDistinctValues(colDef, more = false) {
 function renderFilterDialog(anchor) {
   $('#dialog-root').innerHTML = ''; const fdlg = state.fdlg; if (!fdlg) return;
   const dlg = el('div', { class: 'fdialog' });
-  dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); } }, tt('sortAsc')), el('button', { onclick: () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); } }, tt('sortDesc')), el('button', { onclick: () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); } }, tt('clearFilter'))));
+  // For a pivot row/column field the sort/clear actions drive the pivot axis (and drop any manual
+  // drag order); for a plain table column they drive the table sort/filter as before.
+  const pvAxisOf = (pv, c) => pv.rows.some(r => r.col === c) ? 'rowSort' : (pv.cols.some(r => r.col === c) ? 'colSort' : null);
+  const pivotSort = (dir) => { const pv = state.pivot[state.activeTable], ax = pvAxisOf(pv, fdlg.col.name); if (ax) pv[ax] = { by: 'label', dir }; if (pv.memberOrder) delete pv.memberOrder[fdlg.col.name]; closeDialog(); refreshPivotView(); };
+  const sortAscFn = fdlg.isPivotFilter ? () => pivotSort('asc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); };
+  const sortDescFn = fdlg.isPivotFilter ? () => pivotSort('desc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); };
+  const clearFn = fdlg.isPivotFilter ? () => { fdlg.isPivotFilter.filter = null; closeDialog(); refreshPivotView(); } : () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); };
+  dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: sortAscFn }, tt('sortAsc')), el('button', { onclick: sortDescFn }, tt('sortDesc')), el('button', { onclick: clearFn }, tt('clearFilter'))));
 
   const kind = fdlg.col.kind, tabsArr = [['values', tt('tabValues')]];
   if (kind === 'num') tabsArr.push(['num', tt('tabNumber')]); else if (kind === 'date') tabsArr.push(['date', tt('tabDate')]); else tabsArr.push(['text', tt('tabText')]);
@@ -1281,6 +1297,17 @@ function renderValuesList(container) {
   if (!fdlg.values) { container.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('loading'))); return; }
   const search = (fdlg.search || '').toLowerCase();
   const items = fdlg.values.filter(v => !search || String(v.value).toLowerCase().includes(search));
+  // Manual member ordering: only for a pivot row/column dimension, and only while not searching
+  // (the on-screen order must equal the order in fdlg.values for the indices to line up).
+  const pvForOrder = fdlg.isPivotFilter ? state.pivot[state.activeTable] : null;
+  const reorderable = !!pvForOrder && !search && (pvForOrder.rows.some(r => r.col === fdlg.col.name) || pvForOrder.cols.some(r => r.col === fdlg.col.name));
+  const reorderValues = (fromVal, toVal, before) => {
+    if (fromVal === toVal) return;
+    const arr = fdlg.values, fi = arr.findIndex(v => v.value === fromVal); if (fi === -1) return;
+    const moving = arr[fi]; arr.splice(fi, 1);
+    let ti = arr.findIndex(v => v.value === toVal); if (ti === -1) ti = arr.length;
+    arr.splice(before ? ti : ti + 1, 0, moving); fdlg._orderChanged = true;
+  };
   // When a measure column is active the per-value number is a SUM (possibly fractional), otherwise a count.
   const fmtCnt = fdlg.measureCol
     ? (n) => new Intl.NumberFormat(activeLocale().intl, { maximumFractionDigits: 2 }).format(Number(n))
@@ -1288,6 +1315,7 @@ function renderValuesList(container) {
 
   // ── Note explaining that the numbers are the measure sum, not row counts ──
   if (fdlg.measureCol) container.appendChild(el('div', { style:'font-size:10px; color:var(--text-faint); padding:0 4px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;', title: tt('measureNote', fdlg.measureCol) }, tt('measureNote', fdlg.measureCol)));
+  if (reorderable) container.appendChild(el('div', { style:'font-size:10px; color:var(--accent); padding:0 4px 4px;' }, tt('dragToOrder')));
 
   // ── Select All row (label and behaviour depend on whether a search is active) ──
   const isSearching = !!search;
@@ -1349,7 +1377,7 @@ function renderValuesList(container) {
   const inner = el('div', { class:'vlist-inner' });
   for (const it of items) {
     const checked = fdlg.selectAll || (fdlg.selected && fdlg.selected.has(it.value));
-    inner.appendChild(el('label', { class:'vlist-item' },
+    const row = el('label', { class:'vlist-item' },
       el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => {
         fdlg.selectAll = false;
         if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
@@ -1358,7 +1386,18 @@ function renderValuesList(container) {
       }}),
       el('span', { class:'val' }, String(it.value)),
       el('span', { class:'count' }, fmtCnt(it.count))
-    ));
+    );
+    if (reorderable) {
+      // Drag from the grip only (so the checkbox stays clickable); the whole row is the drop target.
+      const grip = el('span', { class:'vlist-grip', draggable:'true', title: tt('dragToOrder'), onclick: (e) => e.preventDefault() }, '⠿');
+      grip.addEventListener('dragstart', (e) => { fdlg._dragVal = it.value; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(it.value)); row.classList.add('dragging'); });
+      grip.addEventListener('dragend', () => { row.classList.remove('dragging'); fdlg._dragVal = undefined; });
+      row.addEventListener('dragover', (e) => { if (fdlg._dragVal === undefined) return; e.preventDefault(); const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2; row.classList.toggle('drag-over-before', before); row.classList.toggle('drag-over-after', !before); });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over-before', 'drag-over-after'));
+      row.addEventListener('drop', (e) => { e.preventDefault(); row.classList.remove('drag-over-before', 'drag-over-after'); const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2; const from = fdlg._dragVal; fdlg._dragVal = undefined; if (from !== undefined) { reorderValues(from, it.value, before); renderValuesList(container); } });
+      row.insertBefore(grip, row.firstChild);
+    }
+    inner.appendChild(row);
   }
   if (items.length === 0 && !fdlg.hasNulls) inner.appendChild(el('div', { style:'color:var(--text-faint); padding:8px;' }, tt('noMatches')));
   if (fdlg.hasNulls && (!search || '(blanks)'.includes(search) || '(null)'.includes(search))) {
@@ -1402,7 +1441,14 @@ function applyFilterDialog() {
     const adv = fdlg.tab === 'num' ? fdlg.advNum : (fdlg.tab === 'date' ? fdlg.advDate : fdlg.advText);
     if (adv.a !== '' && adv.a !== null && adv.a !== undefined) finalFilter = { type: adv.type, op: adv.op, a: adv.a, b: adv.b };
   }
-  if (fdlg.isPivotFilter) { fdlg.isPivotFilter.filter = finalFilter; closeDialog(); refreshPivotView(); return; }
+  if (fdlg.isPivotFilter) {
+    // Persist a manual member display order if the user dragged rows for a pivot row/col dimension.
+    if (fdlg._orderChanged && fdlg.values) {
+      const pv = state.pivot[tn];
+      if (pv.rows.some(r => r.col === col) || pv.cols.some(r => r.col === col)) { pv.memberOrder = pv.memberOrder || {}; pv.memberOrder[col] = fdlg.values.map(v => String(v.value)); }
+    }
+    fdlg.isPivotFilter.filter = finalFilter; closeDialog(); refreshPivotView(); return;
+  }
   if (finalFilter) state.filters[tn][col] = finalFilter; else delete state.filters[tn][col];
   state.page = 0; closeDialog(); refreshTableView();
 }
@@ -1719,16 +1765,24 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
   // Row/column member ordering: by label (numeric-aware) or by the first value field's total,
   // ascending or descending. Value totals come from the ROLLUP cells in cellMap.
   const rowSort = pv.rowSort || { by: 'label', dir: 'asc' }, colSort = pv.colSort || { by: 'label', dir: 'asc' };
+  const memberOrder = pv.memberOrder || {};
   const cmpLabel = (a, b) => { const av = a.vals[a.vals.length-1], bv = b.vals[b.vals.length-1]; return (typeof av === 'number' && typeof bv === 'number') ? av - bv : String(av).localeCompare(String(bv)); };
   const measureOf = (node, axis) => { const cell = axis === 'row' ? cellMap.get(safeJoin(node.vals) + '#') : cellMap.get('#' + safeJoin(node.vals)); const v = cell ? Number(cell[0]) : 0; return isFinite(v) ? v : 0; };
-  const sortTree = (n, axis, sort) => {
-    n.children.sort((a, b) => {
-      const c = sort.by === 'value' ? ((measureOf(a, axis) - measureOf(b, axis)) || cmpLabel(a, b)) : cmpLabel(a, b);
-      return sort.dir === 'desc' ? -c : c;
-    });
-    n.children.forEach(c => sortTree(c, axis, sort));
+  const sortTree = (n, axis, sort, dims) => {
+    // A manual drag-defined order for this level's dimension (if any) wins over the A→Z / value sort.
+    const col = dims[n.depth + 1], custom = col ? memberOrder[col] : null;
+    if (custom && custom.length) {
+      const rank = (node) => { const i = custom.indexOf(String(node.vals[node.vals.length-1])); return i === -1 ? custom.length : i; };
+      n.children.sort((a, b) => (rank(a) - rank(b)) || cmpLabel(a, b));
+    } else {
+      n.children.sort((a, b) => {
+        const c = sort.by === 'value' ? ((measureOf(a, axis) - measureOf(b, axis)) || cmpLabel(a, b)) : cmpLabel(a, b);
+        return sort.dir === 'desc' ? -c : c;
+      });
+    }
+    n.children.forEach(c => sortTree(c, axis, sort, dims));
   };
-  sortTree(rowTreeRoot, 'row', rowSort); sortTree(colTreeRoot, 'col', colSort);
+  sortTree(rowTreeRoot, 'row', rowSort, rowDims); sortTree(colTreeRoot, 'col', colSort, colDims);
 
   const leafCols = [];
   function walkCol(node) {
