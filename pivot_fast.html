@@ -201,8 +201,10 @@
   .pivot-toolbar .btn-ico .icon { width: 12px; height: 12px; }
   .pivot-toolbar button.preset-on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .pivot-toolbar button.preset-on:hover { background: var(--accent); filter: brightness(1.08); }
-  .pivot-toolbar .pv-hide-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; user-select: none; }
-  .pivot-toolbar .pv-hide-toggle input { margin: 0; }
+  .pivot-toolbar .pv-hide-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; user-select: none; }
+  .pivot-toolbar .pv-hide-toggle .pv-hide-cb { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .pivot-toolbar .pv-hide-toggle input[type=checkbox] { margin: 0; }
+  .pivot-toolbar .pv-hide-toggle input.pv-hide-thresh { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); font-size: 11px; }
   .pivot-toolbar .pks-fiber { display: inline-flex; align-items: center; gap: 0; }
   .pivot-toolbar .pks-fiber .pks-fiber-lbl { font-size: 11px; color: var(--text-faint); margin-right: 6px; }
   .pivot-toolbar .pks-fiber button.pks-fiber-seg { border-radius: 0; margin: 0; border-left-width: 0; }
@@ -490,7 +492,7 @@ const I18N = {
     showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
     sortRows: 'Zeilen:', sortCols: 'Spalten:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Wert ↓', sortValAsc: 'Wert ↑',
     theme: 'Design', themeDefault: 'Standard (Blau)', themeTelekom: 'Telekom (Magenta)',
-    hideBelow: '< 1 % ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter 1 % liegt',
+    hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
     allFilter: '(Alle)', multipleItems: '(Mehrere Elemente)', custom: '(Benutzerdefiniert)',
@@ -501,6 +503,7 @@ const I18N = {
     saveNow: 'Jetzt speichern', clearSaved: 'Gespeicherte Daten löschen', settingsSaved: 'Einstellungen gespeichert',
     autosaveOn: 'Auto-Speichern', autosaveOff: 'Nicht gespeichert', saved: 'Gespeichert',
     autosaveOnTip: 'Ansicht & Dateien werden automatisch im Browser gespeichert', autosaveOffTip: 'Speichern ist deaktiviert — Klicken zum Aktivieren',
+    saveFailedShort: 'Speichern fehlgeschlagen', saveFailed: 'Speichern fehlgeschlagen: {0}', saveQuota: 'Speichern fehlgeschlagen: Browser-Speicher voll. Tipp: manuelle Sortierreihenfolge von Elementen mit sehr vielen Werten zurücksetzen oder „Dateien merken" deaktivieren.',
     sessionStatus: 'Status', statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
     confirmClear: 'Alle gespeicherten Ansichten und Dateien löschen? Geladene Tabellen bleiben in dieser Sitzung erhalten.',
     removeTable: 'Tabelle entfernen', confirmRemoveTable: 'Tabelle „{0}" entfernen? Die geladene Datei wird verworfen.',
@@ -548,7 +551,7 @@ const I18N = {
     showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
     sortRows: 'Rows:', sortCols: 'Cols:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Value ↓', sortValAsc: 'Value ↑',
     theme: 'Theme', themeDefault: 'Default (Blue)', themeTelekom: 'Telekom (Magenta)',
-    hideBelow: 'Hide < 1%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below 1%',
+    hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
     allFilter: '(All)', multipleItems: '(Multiple Items)', custom: '(Custom)',
@@ -559,6 +562,7 @@ const I18N = {
     saveNow: 'Save now', clearSaved: 'Clear saved data', settingsSaved: 'Settings saved',
     autosaveOn: 'Auto-save', autosaveOff: 'Not saved', saved: 'Saved',
     autosaveOnTip: 'View & files are saved automatically in this browser', autosaveOffTip: 'Saving is off — click to turn on',
+    saveFailedShort: 'Save failed', saveFailed: 'Save failed: {0}', saveQuota: 'Save failed: browser storage is full. Tip: reset manual member ordering on very high-cardinality fields, or turn off "Remember files".',
     sessionStatus: 'Status', statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
     confirmClear: 'Forget all saved view settings and stored files? Loaded tables stay in this session.',
     removeTable: 'Remove table', confirmRemoveTable: 'Remove table "{0}"? The loaded file will be discarded.',
@@ -667,7 +671,7 @@ function serializePivot(pv) {
   return {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
     expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals,
-    showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, rowSort: pv.rowSort, colSort: pv.colSort,
+    showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, hideThresholdPct: pv.hideThresholdPct, rowSort: pv.rowSort, colSort: pv.colSort,
     memberOrder: pv.memberOrder || {},
   };
 }
@@ -677,7 +681,7 @@ function deserializePivot(s) {
   const pv = {
     filters: (s.filters || []).map(field), cols: (s.cols || []).map(field), rows: (s.rows || []).map(field), values: (s.values || []).map(field),
     expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top',
-    showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct,
+    showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct, hideThresholdPct: (typeof s.hideThresholdPct === 'number' && s.hideThresholdPct >= 0) ? s.hideThresholdPct : 1,
     rowSort: s.rowSort || { by: 'label', dir: 'asc' }, colSort: s.colSort || { by: 'label', dir: 'asc' },
     memberOrder: s.memberOrder || {},
   };
@@ -722,7 +726,18 @@ function savePrefsNow() {
     const elS = $('#save-status');
     if (elS) { elS.classList.add('flash'); clearTimeout(savePrefsNow._t); savePrefsNow._t = setTimeout(() => elS.classList.remove('flash'), 700); }
     updateSaveStatus();
-  } catch (e) { console.warn('Failed to save prefs:', e); }
+    state._saveError = null;
+  } catch (e) {
+    console.warn('Failed to save prefs:', e);
+    // Surface the failure instead of swallowing it — a silent save is worse than a loud one.
+    const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+    if (state._saveError !== (quota ? 'quota' : 'err')) {
+      state._saveError = quota ? 'quota' : 'err';
+      toast(quota ? tt('saveQuota') : tt('saveFailed', e.message || e), true);
+    }
+    const elS = $('#save-status');
+    if (elS) { elS.className = 'save-status off'; elS.textContent = '⚠ ' + tt('saveFailedShort'); elS.title = quota ? tt('saveQuota') : String(e.message || e); }
+  }
 }
 // Always-visible top-bar indicator so saving isn't hidden away in a menu.
 function updateSaveStatus() {
@@ -926,7 +941,7 @@ function prunePivotToSchema(pv, schema) {
   pv.rows = pv.rows.filter(r => cols.has(r.col)); pv.cols = pv.cols.filter(r => cols.has(r.col));
   pv.values = pv.values.filter(r => cols.has(r.col)); pv.filters = pv.filters.filter(r => cols.has(r.col));
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, hideThresholdPct: 1, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
 
 // ── PKS tab: a predefined-but-editable pivot living in its own per-table store ──
 // Which store the live pivot UI reads/writes depends on the active mode (see activePivot).
@@ -1751,8 +1766,13 @@ function renderPivotToolbar() {
     el('span', { style:'border-left:1px solid var(--border); align-self:stretch; margin:0 2px;' }),
     el('span', null, tt('showAs')),
     el('select', { class:'agg-select', title: tt('showAs'), onchange: (e) => { pv.showAs = e.target.value; renderContent(); scheduleSave(); } }, showAsOpts.map(([v,l]) => el('option', { value:v, selected: pv.showAs===v?'':null }, l))),
-    el('label', { class:'pv-hide-toggle', title: tt('hideBelowTitle') },
-      el('input', { type:'checkbox', checked: pv.hideBelowPct ? '' : null, onchange: (e) => { pv.hideBelowPct = e.target.checked; renderContent(); scheduleSave(); } }), tt('hideBelow')),
+    el('span', { class:'pv-hide-toggle', title: tt('hideBelowTitle') },
+      el('label', { class:'pv-hide-cb' },
+        el('input', { type:'checkbox', checked: pv.hideBelowPct ? '' : null, onchange: (e) => { pv.hideBelowPct = e.target.checked; renderContent(); scheduleSave(); } }),
+        el('span', null, tt('hideBelowPre'))),
+      el('input', { type:'number', class:'pv-hide-thresh', min:'0', step:'0.1', value: String(pv.hideThresholdPct ?? 1),
+        onchange: (e) => { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) v = 0; pv.hideThresholdPct = v; e.target.value = String(v); if (pv.hideBelowPct) renderContent(); scheduleSave(); } }),
+      el('span', { class:'pv-hide-post' }, tt('hideBelowPost'))),
     el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
 }
@@ -1923,7 +1943,8 @@ function applyTheme() {
   PV_HEADER_COLORS = PV_HEADER_PALETTES[th];
 }
 
-const PIVOT_HIDE_THRESHOLD = 0.01; // rows contributing < 1% of the grand total are hidden when the toggle is on
+// Rows contributing less than pv.hideThresholdPct % of the grand total are hidden when the toggle is on.
+const PIVOT_HIDE_DEFAULT_PCT = 1;
 
 function renderPivotGrid() {
   const sh = state.pivotShape, pv = activePivot(), nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
@@ -1962,6 +1983,7 @@ function renderPivotGrid() {
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   if (pv.hideBelowPct) {
+    const thr = Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100;
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
     const nodeKeeps = (n) => {
       const rKey = safeJoin(n.vals);
@@ -1970,7 +1992,7 @@ function renderPivotGrid() {
         if (!cell || !colTot) continue;
         for (let vi = 0; vi < nValues; vi++) {
           const base = Number(colTot[vi]);
-          if (base && Math.abs(Number(cell[vi]) / base) >= PIVOT_HIDE_THRESHOLD) return true;
+          if (base && Math.abs(Number(cell[vi]) / base) >= thr) return true;
         }
       }
       return false;
