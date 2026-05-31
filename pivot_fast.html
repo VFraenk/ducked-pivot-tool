@@ -203,6 +203,13 @@
   .pivot-toolbar button.preset-on:hover { background: var(--accent); filter: brightness(1.08); }
   .pivot-toolbar .pv-hide-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; user-select: none; }
   .pivot-toolbar .pv-hide-toggle input { margin: 0; }
+  .pivot-toolbar .pks-fiber { display: inline-flex; align-items: center; gap: 0; }
+  .pivot-toolbar .pks-fiber .pks-fiber-lbl { font-size: 11px; color: var(--text-faint); margin-right: 6px; }
+  .pivot-toolbar .pks-fiber button.pks-fiber-seg { border-radius: 0; margin: 0; border-left-width: 0; }
+  .pivot-toolbar .pks-fiber button.pks-fiber-seg:first-of-type { border-radius: 3px 0 0 3px; border-left-width: 1px; }
+  .pivot-toolbar .pks-fiber button.pks-fiber-seg:last-of-type { border-radius: 0 3px 3px 0; }
+  .pivot-toolbar .pks-fiber button.pks-fiber-seg.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .pivot-toolbar .pks-fiber button.pks-fiber-seg.active:hover { background: var(--accent); filter: brightness(1.08); }
   /* Pivot grid */
   table.pgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
   table.pgrid thead { position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--pv-border); }
@@ -426,7 +433,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pivotData: null, pivotShape: null,
+  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -454,7 +461,8 @@ const I18N = {
     initializing: 'wird initialisiert…', ready: 'DuckDB bereit', failed: 'DuckDB FEHLER', restoring: 'wird wiederhergestellt…',
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
-    table: 'Tabelle', pivot: 'Pivot', sql: 'SQL',
+    table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
+    resetPreset: 'Zurücksetzen', fiberLabel: 'Technik:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: „Ohne Fiber" = ≠ Fiber, „Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
     sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
     rowsOf: '{0} / {1} Zeilen', first: '« Erste', prev: '‹ Zurück', next: 'Weiter ›', last: 'Letzte »', pageOf: 'Seite {0} / {1}',
@@ -511,7 +519,8 @@ const I18N = {
     initializing: 'initializing…', ready: 'duckdb ready', failed: 'duckdb FAILED', restoring: 'restoring…',
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
-    table: 'Table', pivot: 'Pivot', sql: 'SQL',
+    table: 'Table', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
+    resetPreset: 'Reset', fiberLabel: 'Tech:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: "Ohne Fiber" = ≠ Fiber, "Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
     sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
     rowsOf: '{0} / {1} rows', first: '« First', prev: '‹ Prev', next: 'Next ›', last: 'Last »', pageOf: 'Page {0} / {1}',
@@ -689,6 +698,7 @@ function collectPrefs() {
       hidden: [...(state.hidden[n] || new Set())],
       colWidths: state.colWidths[n] || {},
       pivot: serializePivot(state.pivot[n] || newPivotState()),
+      pksPivot: state.pksPivot[n] ? serializePivot(state.pksPivot[n]) : null,
     };
   }
   return {
@@ -772,6 +782,7 @@ function applyTablePrefs(name, prefs) {
   state.hidden[name] = new Set(tp.hidden || []);
   state.colWidths[name] = tp.colWidths || {};
   state.pivot[name] = deserializePivot(tp.pivot);
+  if (tp.pksPivot) state.pksPivot[name] = deserializePivot(tp.pksPivot);
 }
 
 // ── IndexedDB: store raw parquet buffers so tables survive a page reload ──
@@ -891,6 +902,34 @@ function sanitizeTableName(filename, existing) {
 }
 function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
 
+// ── PKS tab: a predefined-but-editable pivot living in its own per-table store ──
+// Which store the live pivot UI reads/writes depends on the active mode (see activePivot).
+function ensurePksPivot() {
+  const tn = state.activeTable; if (!tn) return null;
+  if (!state.pksPivot[tn]) state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn));
+  return state.pksPivot[tn];
+}
+function activePivot() { return state.mode === 'pks' ? ensurePksPivot() : state.pivot[state.activeTable]; }
+
+// The td_bb_technik filter behind the Ohne Fiber / Nur Fiber toggle.
+function pksFiberFilter(only) { return only ? { type: 'text', op: 'eq', a: 'Fiber', not: false } : { type: 'text', op: 'eq', a: 'Fiber', not: true, keepNull: true }; }
+
+// Predefined PKS report, restricted to the columns the active table actually has.
+function pksPresetConfig(table) {
+  const cols = new Set((table?.schema || []).map(c => c.name)), has = (c) => cols.has(c);
+  const pv = newPivotState();
+  pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'phase_1_bb_agb_brutto' }].filter(r => has(r.col));
+  pv.cols = [{ col: 'anschluss_bandbreite_cluster' }].filter(r => has(r.col));
+  pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
+  pv.hideBelowPct = true;
+  const f = [];
+  for (const col of ['funk_kenner', 'regio_kenner', 'hybrid_kenner']) if (has(col)) f.push({ col, filter: { type: 'text', op: 'eq', a: 'False', not: true, keepNull: true } });
+  if (has('fn_planungshauptgruppe_pk')) f.push({ col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: ['ET', 'DP'] } });
+  if (has('td_bb_technik')) f.push({ col: 'td_bb_technik', filter: pksFiberFilter(false) });
+  pv.filters = f;
+  return pv;
+}
+
 // FILTER -> SQL
 function buildWhere(table, filters) {
   const clauses = [];
@@ -962,7 +1001,7 @@ async function refreshTableView() {
 
 async function refreshActiveView() {
   if (state.mode === 'table') return refreshTableView();
-  if (state.mode === 'pivot') return refreshPivotView();
+  if (state.mode === 'pivot' || state.mode === 'pks') return refreshPivotView();
 }
 
 // RENDER HELPERS
@@ -994,7 +1033,7 @@ async function dropTable(name) {
   const idx = state.tables.findIndex(t => t.name === name); if (idx === -1) return;
   const t = state.tables[idx];
   try { await state.conn.query(`DROP VIEW IF EXISTS ${qid(name)}`); await state.db.dropFile(t.file); } catch (_) {}
-  delete state.filters[name]; delete state.sorts[name]; delete state.hidden[name]; delete state.colWidths[name]; delete state.pivot[name];
+  delete state.filters[name]; delete state.sorts[name]; delete state.hidden[name]; delete state.colWidths[name]; delete state.pivot[name]; delete state.pksPivot[name];
   for (const k of [...state.distinctCache.keys()]) if (k.startsWith(name + '::')) state.distinctCache.delete(k);
   state.tables.splice(idx, 1);
   if (state.activeTable === name) { state.activeTable = state.tables[0]?.name || null; state.page = 0; state.rows = []; state.pivotShape = null; state.sqlResult = null; }
@@ -1013,20 +1052,21 @@ function renderContent() {
   root.appendChild(el('div', { class: 'mode-tabs' },
     el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, tt('table')),
     el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, tt('pivot')),
+    el('button', { class: 'mode-tab' + (state.mode==='pks'?' active':''), onclick: () => switchMode('pks') }, tt('pks')),
     el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, tt('sql'))
   ));
   if (state.mode === 'table') root.appendChild(renderTableMode());
-  else if (state.mode === 'pivot') root.appendChild(renderPivotMode());
+  else if (state.mode === 'pivot' || state.mode === 'pks') root.appendChild(renderPivotMode());
   else if (state.mode === 'sql') root.appendChild(renderSQLMode());
 }
 
 function switchMode(m) {
   state.mode = m;
   const sidebar = $('#sidebar'), toggleBtn = $('#sidebar-toggle');
-  if (m === 'pivot') { sidebar.classList.add('collapsed'); toggleBtn.textContent = tt('schemaHide'); }
+  if (m === 'pivot' || m === 'pks') { sidebar.classList.add('collapsed'); toggleBtn.textContent = tt('schemaHide'); }
   else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = tt('schemaShow'); }
   renderContent();
-  if (m === 'table') refreshTableView(); if (m === 'pivot') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
+  if (m === 'table') refreshTableView(); if (m === 'pivot' || m === 'pks') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
   scheduleSave();
 }
 
@@ -1166,7 +1206,7 @@ function fdlgMeasureCol() {
 function fdlgFilterContext() {
   const fdlg = state.fdlg, tn = state.activeTable, colName = fdlg.col.name, other = {};
   if (fdlg.isPivotFilter) {
-    const pv = state.pivot[tn];
+    const pv = activePivot();
     for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter && f.col !== colName) other[f.col] = f.filter;
   } else {
     const fm = state.filters[tn] || {};
@@ -1227,7 +1267,7 @@ function renderFilterDialog(anchor) {
   // For a pivot row/column field the sort/clear actions drive the pivot axis (and drop any manual
   // drag order); for a plain table column they drive the table sort/filter as before.
   const pvAxisOf = (pv, c) => pv.rows.some(r => r.col === c) ? 'rowSort' : (pv.cols.some(r => r.col === c) ? 'colSort' : null);
-  const pivotSort = (dir) => { const pv = state.pivot[state.activeTable], ax = pvAxisOf(pv, fdlg.col.name); if (ax) pv[ax] = { by: 'label', dir }; if (pv.memberOrder) delete pv.memberOrder[fdlg.col.name]; closeDialog(); refreshPivotView(); };
+  const pivotSort = (dir) => { const pv = activePivot(), ax = pvAxisOf(pv, fdlg.col.name); if (ax) pv[ax] = { by: 'label', dir }; if (pv.memberOrder) delete pv.memberOrder[fdlg.col.name]; closeDialog(); refreshPivotView(); };
   const sortAscFn = fdlg.isPivotFilter ? () => pivotSort('asc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); };
   const sortDescFn = fdlg.isPivotFilter ? () => pivotSort('desc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); };
   const clearFn = fdlg.isPivotFilter ? () => { fdlg.isPivotFilter.filter = null; closeDialog(); refreshPivotView(); } : () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); };
@@ -1299,7 +1339,7 @@ function renderValuesList(container) {
   const items = fdlg.values.filter(v => !search || String(v.value).toLowerCase().includes(search));
   // Manual member ordering: only for a pivot row/column dimension, and only while not searching
   // (the on-screen order must equal the order in fdlg.values for the indices to line up).
-  const pvForOrder = fdlg.isPivotFilter ? state.pivot[state.activeTable] : null;
+  const pvForOrder = fdlg.isPivotFilter ? activePivot() : null;
   const reorderable = !!pvForOrder && !search && (pvForOrder.rows.some(r => r.col === fdlg.col.name) || pvForOrder.cols.some(r => r.col === fdlg.col.name));
   const reorderValues = (fromVal, toVal, before) => {
     if (fromVal === toVal) return;
@@ -1444,7 +1484,7 @@ function applyFilterDialog() {
   if (fdlg.isPivotFilter) {
     // Persist a manual member display order if the user dragged rows for a pivot row/col dimension.
     if (fdlg._orderChanged && fdlg.values) {
-      const pv = state.pivot[tn];
+      const pv = activePivot();
       if (pv.rows.some(r => r.col === col) || pv.cols.some(r => r.col === col)) { pv.memberOrder = pv.memberOrder || {}; pv.memberOrder[col] = fdlg.values.map(v => String(v.value)); }
     }
     fdlg.isPivotFilter.filter = finalFilter; closeDialog(); refreshPivotView(); return;
@@ -1488,7 +1528,7 @@ function renderPivotMode() {
 }
 
 function renderPivotFields() {
-  const tn = state.activeTable, table = state.tables.find(t => t.name === tn), pv = state.pivot[tn], wrap = el('div', { class:'pivot-fields' });
+  const tn = state.activeTable, table = state.tables.find(t => t.name === tn), pv = activePivot(), wrap = el('div', { class:'pivot-fields' });
   wrap.appendChild(el('div', { class:'pivot-fields-h' }, tt('pivotFields')));
 
   // One row builder, reused by both the initial list and the live search filter.
@@ -1524,7 +1564,7 @@ function removeFieldFromAll(pv, col) {
 }
 
 function renderChip(tileKey, item, idx) {
-  const tn = state.activeTable, pv = state.pivot[tn], chip = el('div', { class:'pivot-chip', draggable:'true' });
+  const tn = state.activeTable, pv = activePivot(), chip = el('div', { class:'pivot-chip', draggable:'true' });
   chip.appendChild(el('span', { class:'name' }, item.col));
   if (tileKey === 'values') { chip.appendChild(el('select', { class:'agg-select', onchange: (e) => { item.agg = e.target.value; refreshPivotView(); } }, ...VALUE_AGGREGATIONS.map(a => el('option', { value:a, selected: item.agg === a ? '' : null }, a.replace('_',' '))))); }
   if (tileKey !== 'values') { chip.appendChild(el('span', { class: 'filter-btn' + (item.filter ? ' active' : ''), title: 'Set filter', html: item.filter ? ICONS.funnelFilled : ICONS.funnel, onclick: (e) => { e.stopPropagation(); openPivotFilterDialog(item, e.currentTarget); } })); }
@@ -1557,7 +1597,7 @@ function openPivotFilterDialog(filterItem, anchor) {
 }
 
 function renderPivotReportFilters() {
-  const pv = state.pivot[state.activeTable];
+  const pv = activePivot();
   if (!pv.filters || pv.filters.length === 0) return null;
   const collapsed = !!pv._rfCollapsed;
   const wrap = el('div', { class: 'pivot-report-filters' });
@@ -1635,7 +1675,7 @@ function isPresetActive(pv) {
 }
 
 function togglePivotPreset() {
-  const pv = state.pivot[state.activeTable];
+  const pv = activePivot();
   if (!pv) return;
   const applicable = presetApplicable(pv);
   if (applicable.length === 0) { toast(tt('presetNoCols'), true); return; }
@@ -1662,7 +1702,7 @@ function togglePivotPreset() {
 }
 
 function renderPivotToolbar() {
-  const pv = state.pivot[state.activeTable];
+  const pv = activePivot();
   const stLabels = { top: tt('stTop'), bottom: tt('stBottom'), off: tt('stOff') };
   const presetOn = isPresetActive(pv);
   const showAsOpts = [['abs', tt('saAbs')], ['pctRow', tt('saPctRow')], ['pctCol', tt('saPctCol')], ['pctGrand', tt('saPctGrand')]];
@@ -1677,9 +1717,11 @@ function renderPivotToolbar() {
     el('span', null, tt('sortCols')), sortSelect('colSort', colSort),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
-    el('button', { onclick: () => { state.pivot[state.activeTable] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, tt('clear')),
-    el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
-      el('span', { class:'btn-ico', html: presetOn ? ICONS.funnelFilled : ICONS.funnel }), tt('presetFilter')),
+    el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn)); else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
+    state.mode === 'pks'
+      ? renderPksFiberToggle(pv)
+      : el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
+          el('span', { class:'btn-ico', html: presetOn ? ICONS.funnelFilled : ICONS.funnel }), tt('presetFilter')),
     el('span', { style:'border-left:1px solid var(--border); align-self:stretch; margin:0 2px;' }),
     el('span', null, tt('showAs')),
     el('select', { class:'agg-select', title: tt('showAs'), onchange: (e) => { pv.showAs = e.target.value; renderContent(); scheduleSave(); } }, showAsOpts.map(([v,l]) => el('option', { value:v, selected: pv.showAs===v?'':null }, l))),
@@ -1687,6 +1729,25 @@ function renderPivotToolbar() {
       el('input', { type:'checkbox', checked: pv.hideBelowPct ? '' : null, onchange: (e) => { pv.hideBelowPct = e.target.checked; renderContent(); scheduleSave(); } }), tt('hideBelow')),
     el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
+}
+
+// PKS-only segmented control switching the td_bb_technik filter between != Fiber and == Fiber.
+function renderPksFiberToggle(pv) {
+  const table = state.tables.find(t => t.name === state.activeTable);
+  if (!table || !table.schema.some(c => c.name === 'td_bb_technik')) return null;
+  const mode = pksFiberMode(pv);
+  const seg = (key, label) => el('button', { class: 'pks-fiber-seg' + (mode === key ? ' active' : ''), onclick: () => setPksFiber(pv, key === 'only') }, label);
+  return el('div', { class: 'pks-fiber', title: tt('fiberTitle') }, el('span', { class:'pks-fiber-lbl' }, tt('fiberLabel')), seg('without', tt('fiberOhne')), seg('only', tt('fiberNur')));
+}
+function pksFiberMode(pv) {
+  const f = fieldForCol(pv, 'td_bb_technik'), fl = f && f.filter;
+  if (fl && fl.type === 'text' && fl.op === 'eq' && fl.a === 'Fiber') return fl.not ? 'without' : 'only';
+  return null;
+}
+function setPksFiber(pv, only) {
+  const existing = fieldForCol(pv, 'td_bb_technik');
+  if (existing) existing.filter = pksFiberFilter(only); else pv.filters.push({ col: 'td_bb_technik', filter: pksFiberFilter(only) });
+  refreshPivotView(); scheduleSave();
 }
 
 function expandAll(pv) {
@@ -1700,7 +1761,7 @@ function expandAll(pv) {
 function renderPivotStatusBar() { const nloc = activeLocale().intl; return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? tt('rowGroups', state.pivotShape.leafRows.length.toLocaleString(nloc), state.pivotShape.leafCols.length.toLocaleString(nloc)) : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
 
 async function refreshPivotView() {
-  const tn = state.activeTable, pv = state.pivot[tn], table = state.tables.find(t => t.name === tn);
+  const tn = state.activeTable, pv = activePivot(), table = state.tables.find(t => t.name === tn);
   if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) { state.pivotData = null; state.pivotShape = null; renderContent(); return; }
   
   const filterMap = {};
@@ -1727,7 +1788,7 @@ async function refreshPivotView() {
 }
 
 function rebuildPivotShape() {
-  if (state.pivotData && state.pivotShape) state.pivotShape = buildPivotShape(state.pivotShape.rowDims, state.pivotShape.colDims, state.pivotShape.valueDefs, state.pivotData, state.pivot[state.activeTable]);
+  if (state.pivotData && state.pivotShape) state.pivotShape = buildPivotShape(state.pivotShape.rowDims, state.pivotShape.colDims, state.pivotShape.valueDefs, state.pivotData, activePivot());
   scheduleSave();
 }
 
@@ -1839,7 +1900,7 @@ function applyTheme() {
 const PIVOT_HIDE_THRESHOLD = 0.01; // rows contributing < 1% of the grand total are hidden when the toggle is on
 
 function renderPivotGrid() {
-  const sh = state.pivotShape, pv = state.pivot[state.activeTable], nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
+  const sh = state.pivotShape, pv = activePivot(), nValues = sh.valueDefs.length, hasColDims = sh.colDims.length > 0;
   const table = el('table', { class:'pgrid' }), colHeaderRows = Math.max(1, sh.colDims.length), thead = el('thead');
   const showAs = pv.showAs || 'abs';
   const cellMap = sh.cellMap;
@@ -2164,7 +2225,7 @@ function buildTableSheet(wb, name, rows, columns) {
 // is present regardless of on-screen collapse state) and maps the hierarchy onto
 // native Excel row/column outline groups, mirroring the web pivot's drill-down.
 function buildPivotSheet(wb) {
-  const sh0 = state.pivotShape, pv = state.pivot[state.activeTable];
+  const sh0 = state.pivotShape, pv = activePivot();
   const effSub = pv.subtotals === 'off' ? 'top' : pv.subtotals;   // grouping needs summary rows to collapse into
   const allExp = expandAll(pv);                                   // every node key from the (full) trees
   const fullPv = { ...pv, subtotals: effSub, expanded: allExp.rows, colExpanded: allExp.cols };
@@ -2330,7 +2391,7 @@ async function doExport(source, format) {
       sql = `SELECT ${table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
     } else if (source === 'sql') { sql = sqlEditor ? sqlEditor.getValue() : state.sqlText; }
     else if (source === 'pivot') {
-      const pv = state.pivot[tn], filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
+      const pv = activePivot(), filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
       const allDims = [...pv.rows.map(r => r.col), ...pv.cols.map(c => c.col)];
       const valExprs = pv.values.map((v) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid(v.col + '_' + v.agg)}`);
       sql = `SELECT ${[...allDims.map(qid), ...valExprs].join(', ')} FROM ${qid(tn)} ${buildWhere(table, filterMap)} ${allDims.length ? `GROUP BY ${allDims.map(qid).join(',')}` : ''}`;
@@ -2439,7 +2500,7 @@ async function restoreSession(prefs) {
   if (!restored) return;
   state.mode = prefs.global?.mode || 'table';
   state.activeTable = (prefs.activeTable && state.tables.some(t => t.name === prefs.activeTable)) ? prefs.activeTable : state.tables[0].name;
-  if (state.mode === 'pivot') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = tt('schemaHide'); }
+  if (state.mode === 'pivot' || state.mode === 'pks') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = tt('schemaHide'); }
   renderAll();
   refreshActiveView();
   if (state.mode === 'sql') setTimeout(initSQLEditor, 0);
