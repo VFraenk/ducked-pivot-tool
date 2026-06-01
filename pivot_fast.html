@@ -503,7 +503,7 @@ const I18N = {
     saveNow: 'Jetzt speichern', clearSaved: 'Gespeicherte Daten löschen', settingsSaved: 'Einstellungen gespeichert',
     autosaveOn: 'Auto-Speichern', autosaveOff: 'Nicht gespeichert', saved: 'Gespeichert',
     autosaveOnTip: 'Ansicht & Dateien werden automatisch im Browser gespeichert', autosaveOffTip: 'Speichern ist deaktiviert — Klicken zum Aktivieren',
-    saveFailedShort: 'Speichern fehlgeschlagen', saveFailed: 'Speichern fehlgeschlagen: {0}', saveQuota: 'Speichern fehlgeschlagen: Browser-Speicher voll. Tipp: manuelle Sortierreihenfolge von Elementen mit sehr vielen Werten zurücksetzen oder „Dateien merken" deaktivieren.',
+    saveFailedShort: 'Speichern fehlgeschlagen', saveFailed: 'Speichern fehlgeschlagen: {0}', saveQuota: 'Speichern fehlgeschlagen: Browser-Speicher voll. Tipp: manuelle Sortierreihenfolge von Elementen mit sehr vielen Werten zurücksetzen oder „Dateien merken" deaktivieren.', saveTrimmed: 'Speicher fast voll — manuelle Sortierreihenfolge wurde nicht mitgespeichert.',
     sessionStatus: 'Status', statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
     confirmClear: 'Alle gespeicherten Ansichten und Dateien löschen? Geladene Tabellen bleiben in dieser Sitzung erhalten.',
     removeTable: 'Tabelle entfernen', confirmRemoveTable: 'Tabelle „{0}" entfernen? Die geladene Datei wird verworfen.',
@@ -562,7 +562,7 @@ const I18N = {
     saveNow: 'Save now', clearSaved: 'Clear saved data', settingsSaved: 'Settings saved',
     autosaveOn: 'Auto-save', autosaveOff: 'Not saved', saved: 'Saved',
     autosaveOnTip: 'View & files are saved automatically in this browser', autosaveOffTip: 'Saving is off — click to turn on',
-    saveFailedShort: 'Save failed', saveFailed: 'Save failed: {0}', saveQuota: 'Save failed: browser storage is full. Tip: reset manual member ordering on very high-cardinality fields, or turn off "Remember files".',
+    saveFailedShort: 'Save failed', saveFailed: 'Save failed: {0}', saveQuota: 'Save failed: browser storage is full. Tip: reset manual member ordering on very high-cardinality fields, or turn off "Remember files".', saveTrimmed: 'Storage nearly full — manual member ordering was not saved.',
     sessionStatus: 'Status', statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
     confirmClear: 'Forget all saved view settings and stored files? Loaded tables stay in this session.',
     removeTable: 'Remove table', confirmRemoveTable: 'Remove table "{0}"? The loaded file will be discarded.',
@@ -720,17 +720,28 @@ function scheduleSave() {
   _saveTimer = setTimeout(savePrefsNow, 400);
 }
 function savePrefsNow() {
+  const prefs = collectPrefs();
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(collectPrefs()));
-    state._lastSaved = Date.now();
-    const elS = $('#save-status');
-    if (elS) { elS.classList.add('flash'); clearTimeout(savePrefsNow._t); savePrefsNow._t = setTimeout(() => elS.classList.remove('flash'), 700); }
-    updateSaveStatus();
-    state._saveError = null;
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    state._saveError = null; saveOk();
+    return;
   } catch (e) {
-    console.warn('Failed to save prefs:', e);
-    // Surface the failure instead of swallowing it — a silent save is worse than a loud one.
     const quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''));
+    // Quota overflow is usually the manual member-ordering arrays. Retry without them so the
+    // rest of the view config (and the pointer to the IndexedDB files) still gets saved.
+    if (quota) {
+      try {
+        for (const t of Object.values(prefs.tables || {})) {
+          if (t.pivot) t.pivot.memberOrder = {};
+          if (t.pksPivot) t.pksPivot.memberOrder = {};
+        }
+        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+        if (state._saveError !== 'trimmed') { toast(tt('saveTrimmed'), true); }
+        state._saveError = 'trimmed'; saveOk();
+        return;
+      } catch (_) { /* fall through to the loud failure below */ }
+    }
+    console.warn('Failed to save prefs:', e);
     if (state._saveError !== (quota ? 'quota' : 'err')) {
       state._saveError = quota ? 'quota' : 'err';
       toast(quota ? tt('saveQuota') : tt('saveFailed', e.message || e), true);
@@ -738,6 +749,13 @@ function savePrefsNow() {
     const elS = $('#save-status');
     if (elS) { elS.className = 'save-status off'; elS.textContent = '⚠ ' + tt('saveFailedShort'); elS.title = quota ? tt('saveQuota') : String(e.message || e); }
   }
+}
+// Mark a successful write in the top-bar indicator (does not touch state._saveError).
+function saveOk() {
+  state._lastSaved = Date.now();
+  const elS = $('#save-status');
+  if (elS) { elS.classList.add('flash'); clearTimeout(savePrefsNow._t); savePrefsNow._t = setTimeout(() => elS.classList.remove('flash'), 700); }
+  updateSaveStatus();
 }
 // Always-visible top-bar indicator so saving isn't hidden away in a menu.
 function updateSaveStatus() {
@@ -2529,11 +2547,13 @@ function openSessionMenu(anchor) {
 // SESSION RESTORE
 // ============================================================
 async function restoreSession(prefs) {
-  if (!prefs || !state.settings.rememberFiles) return;
+  // Files live in IndexedDB independently of the localStorage view-prefs. Restore them even if
+  // prefs are missing/unsaved (e.g. a prior save hit quota) — otherwise the data is orphaned.
+  if (!state.settings.rememberFiles) return;
   let files;
   try { files = await idbGetAll(); } catch { return; }
   if (!files || files.length === 0) return;
-  const order = Object.keys(prefs.tables || {});
+  const order = Object.keys(prefs?.tables || {});
   files.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   setDbStatus('restoring');
   let restored = 0;
@@ -2546,8 +2566,8 @@ async function restoreSession(prefs) {
   }
   setDbStatus('ready');
   if (!restored) return;
-  state.mode = prefs.global?.mode || 'table';
-  state.activeTable = (prefs.activeTable && state.tables.some(t => t.name === prefs.activeTable)) ? prefs.activeTable : state.tables[0].name;
+  state.mode = prefs?.global?.mode || 'table';
+  state.activeTable = (prefs?.activeTable && state.tables.some(t => t.name === prefs.activeTable)) ? prefs.activeTable : state.tables[0].name;
   if (state.mode === 'pivot' || state.mode === 'pks') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = tt('schemaHide'); }
   renderAll();
   refreshActiveView();
