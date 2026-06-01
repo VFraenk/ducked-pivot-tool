@@ -1014,7 +1014,10 @@ function pksPresetConfig(table) {
   pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'phase_1_bb_agb_brutto' }].filter(r => has(r.col));
   pv.cols = [{ col: 'anschluss_bandbreite_cluster' }].filter(r => has(r.col));
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
-  pv.hideBelowPct = true;
+  // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible
+  // (still scoped by the value filters below, not the raw data). The user can enable "< 1 %" to
+  // trim the long tail when they want to; doing so will, by design, pull the totals under 100%.
+  pv.hideBelowPct = false;
   const f = [];
   if (has('fn_planungshauptgruppe_pk')) f.push({ col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: new Set(['ET', 'DP']) } });
   if (has('td_bb_technik')) f.push({ col: 'td_bb_technik', filter: pksFiberFilter(false) });
