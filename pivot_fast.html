@@ -2033,13 +2033,17 @@ function renderPivotGrid() {
   // total rows show the real leftover, not 100%.
   const thrActive = pv.hideBelowPct;
   const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
+  // When the total column shows a share of the grand total (pctCol / pctGrand), a row under 0.05%
+  // rounds to "0,0 %" and looks completely empty — drop it too (display-rounding floor). Absolute and
+  // per-row-% views keep exact non-zero rows; the "< X%" threshold, when larger, takes precedence.
+  const keepFloor = Math.max(thr, (showAs === 'pctCol' || showAs === 'pctGrand') ? 0.0005 : 0);
   const passesKeep = (tot) => {
     if (!tot || !grandCellAll) return true;
     let allZero = true;
     for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) { allZero = false; break; }
     if (allZero) return false;                             // always drop a fully-zero row/column
-    if (!thrActive) return true;
-    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
+    if (keepFloor === 0) return true;
+    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= keepFloor) return true; }
     return false;
   };
   // Prune rows by their grand total (Gesamtergebnis): fully-zero rows always go; with "< X%" on, rows
