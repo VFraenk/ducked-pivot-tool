@@ -510,6 +510,7 @@ const I18N = {
     rememberOn: 'Dateien werden in diesem Browser gespeichert', rememberOff: 'Gespeicherte Dateien gelöscht', clearedData: 'Gespeicherte Daten gelöscht',
     restored: '{0} Tabelle(n) aus der letzten Sitzung wiederhergestellt',
     exportedExcel: 'Excel exportiert ({0}-Format)', excelLoading: 'Excel-Bibliothek lädt noch — gleich erneut versuchen', excelFailed: 'Excel-Export fehlgeschlagen: {0}',
+    sheetFull: 'Pivot (voll)', sheetReduced: 'Pivot (reduziert)',
     buildPivotFirst: 'Erst eine Pivot-Tabelle erstellen', runQueryFirst: 'Erst eine Abfrage ausführen',
     exported: '{0} exportiert', exportFailed: 'Export fehlgeschlagen: {0}', loadFailed: 'Laden von {0} fehlgeschlagen: {1}',
     filterError: 'Filterfehler: {0}', queryError: 'Abfragefehler: {0}', pivotFailed: 'Pivot-Abfrage fehlgeschlagen: {0}',
@@ -569,6 +570,7 @@ const I18N = {
     rememberOn: 'Files will be remembered in this browser', rememberOff: 'Stored files cleared', clearedData: 'Saved data cleared',
     restored: 'Restored {0} table(s) from your last session',
     exportedExcel: 'Exported Excel ({0} formatting)', excelLoading: 'Excel library still loading — try again in a moment', excelFailed: 'Excel export failed: {0}',
+    sheetFull: 'Pivot (full)', sheetReduced: 'Pivot (reduced)',
     buildPivotFirst: 'Add fields to build a pivot first', runQueryFirst: 'Run a query first',
     exported: 'Exported {0}', exportFailed: 'Export failed: {0}', loadFailed: 'Failed to load {0}: {1}',
     filterError: 'Filter error: {0}', queryError: 'Query error: {0}', pivotFailed: 'Pivot query failed: {0}',
@@ -2318,7 +2320,8 @@ function buildTableSheet(wb, name, rows, columns) {
 // Full, grouped, styled pivot. Rebuilds the shape fully-expanded (so every level
 // is present regardless of on-screen collapse state) and maps the hierarchy onto
 // native Excel row/column outline groups, mirroring the web pivot's drill-down.
-function buildPivotSheet(wb) {
+function buildPivotSheet(wb, opts = {}) {
+  const reduced = !!opts.reduced;
   const sh0 = state.pivotShape, pv = activePivot();
   const effSub = pv.subtotals === 'off' ? 'top' : pv.subtotals;   // grouping needs summary rows to collapse into
   const allExp = expandAll(pv);                                   // every node key from the (full) trees
@@ -2326,7 +2329,40 @@ function buildPivotSheet(wb) {
   const sh = buildPivotShape(sh0.rowDims, sh0.colDims, sh0.valueDefs, state.pivotData, fullPv);
 
   const nValues = sh.valueDefs.length, D = sh.colDims.length, hasColDims = D > 0;
-  const leafCols = sh.leafCols;
+  const cellMap = sh.cellMap, grandCellAll = cellMap.get('#');
+  // Reduced sheet mirrors the on-screen pruning: drop fully-zero (and, with "< X%" on, sub-threshold)
+  // rows & columns, blank 0 cells, and net pruned rows out of the totals. Full sheet keeps everything.
+  const thrActive = reduced && pv.hideBelowPct;
+  const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
+  const passesKeep = (tot) => {
+    if (!reduced) return true;
+    if (!tot || !grandCellAll) return true;
+    let allZero = true;
+    for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) { allZero = false; break; }
+    if (allZero) return false;
+    if (!thrActive) return true;
+    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
+    return false;
+  };
+  const hiddenRowKeys = new Set(), prunedRoots = [];
+  if (reduced) {
+    const mark = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(mark); };
+    const walk = (nodes) => { for (const n of nodes) { if (passesKeep(cellMap.get(safeJoin(n.vals) + '#'))) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
+    walk(sh.rowTree);
+  }
+  const leafCols = reduced ? sh.leafCols.filter(lc => passesKeep(cellMap.get('#' + safeJoin(lc.vals)))) : sh.leafCols;
+  const visibleTotal = (node, rKey, cKey) => {
+    const full = cellMap.get(rKey + '#' + cKey);
+    if (!reduced || !full || prunedRoots.length === 0) return full;
+    const out = Array.prototype.map.call(full, Number), nodeKey = node.key;
+    for (const pr of prunedRoots) {
+      if (nodeKey !== '__root' && pr.key !== nodeKey && !pr.key.startsWith(nodeKey + '|')) continue;
+      const sub = cellMap.get(safeJoin(pr.vals) + '#' + cKey);
+      if (sub) for (let vi = 0; vi < nValues; vi++) { const s = Number(sub[vi]); if (isFinite(s)) out[vi] -= s; }
+    }
+    return out;
+  };
+  const cellVal = (v) => (reduced && v !== null && v !== undefined && Number(v) === 0) ? null : v;
   const HEADER_ROWS = Math.max(1, D) + (nValues > 1 ? 1 : 0);
   const dataStartRow = HEADER_ROWS + 1;
   const firstDataCol = 2;
@@ -2334,7 +2370,7 @@ function buildPivotSheet(wb) {
   const gtColStart = firstDataCol + leafCols.length * nValues;
   const valLabel = (vd) => `${vd.agg.replace('_', ' ')}(${vd.col})`;
 
-  const ws = wb.addWorksheet('Pivot');
+  const ws = wb.addWorksheet(reduced ? tt('sheetReduced') : tt('sheetFull'));
 
   const styleHeader = (cell, depth, bold = true) => {
     cell.fill = solid(xlsxHdrBg(depth)); cell.font = { bold, color: { argb: 'FFFFFFFF' }, size: 11 };
@@ -2395,6 +2431,7 @@ function buildPivotSheet(wb) {
   let r = dataStartRow;
   for (const entry of sh.flatRowOrder) {
     const node = entry.node, isGrand = !!entry.isGrand, isSub = !!entry.isSubtotal;
+    if (reduced && !isGrand && hiddenRowKeys.has(node.key)) continue;
     const row = ws.getRow(r);
     const depth = isGrand ? 0 : node.depth;
 
@@ -2420,13 +2457,15 @@ function buildPivotSheet(wb) {
       if (fill) cell.fill = solid(fill);
       if (bold) cell.font = { bold: true };
     };
+    const isTotalRow = isGrand || isSub;
     for (let i = 0; i < leafCols.length; i++) {
-      const cell = sh.cellMap.get(rKey + '#' + safeJoin(leafCols[i].vals));
-      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(leafColStart(i) + vi), cell ? cell[vi] : null, !!leafCols[i].isColSubtotal);
+      const cKey = safeJoin(leafCols[i].vals);
+      const cell = isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
+      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(leafColStart(i) + vi), cellVal(cell ? cell[vi] : null), !!leafCols[i].isColSubtotal);
     }
     if (hasColDims) {
-      const gc = sh.cellMap.get(rKey + '#');
-      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(gtColStart + vi), gc ? gc[vi] : null, true);
+      const gc = isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#');
+      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(gtColStart + vi), cellVal(gc ? gc[vi] : null), true);
     }
     r++;
   }
@@ -2457,7 +2496,9 @@ async function exportXlsx(source) {
     let fileBase = 'export';
     if (source === 'pivot') {
       if (!state.pivotShape || !state.pivotData) { toast(tt('buildPivotFirst'), true); return; }
-      buildPivotSheet(wb); fileBase = (state.activeTable || 'pivot') + '_pivot';
+      buildPivotSheet(wb, { reduced: false });   // sheet 1: full view
+      buildPivotSheet(wb, { reduced: true });    // sheet 2: reduced view (zeros / < X% pruned)
+      fileBase = (state.activeTable || 'pivot') + '_pivot';
     } else if (source === 'sql') {
       if (!state.sqlResult) { toast(tt('runQueryFirst'), true); return; }
       buildTableSheet(wb, 'Query', state.sqlResult.rows, state.sqlResult.columns); fileBase = 'query_result';
