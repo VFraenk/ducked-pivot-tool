@@ -1011,7 +1011,7 @@ function pksFiberFilter(only) { return only ? { type: 'text', op: 'eq', a: 'Fibe
 function pksPresetConfig(table) {
   const cols = new Set((table?.schema || []).map(c => c.name)), has = (c) => cols.has(c);
   const pv = newPivotState();
-  pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'phase_1_bb_agb_brutto' }].filter(r => has(r.col));
+  pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'adj_phase_1_bb_agb_brutto' }, { col: 'tsc_pks_highlight' }].filter(r => has(r.col));
   pv.cols = [{ col: 'anschluss_bandbreite_cluster' }].filter(r => has(r.col));
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
   // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible
