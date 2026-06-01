@@ -965,8 +965,35 @@ function newPivotState() { return { filters: [], cols: [], rows: [], values: [],
 // Which store the live pivot UI reads/writes depends on the active mode (see activePivot).
 function ensurePksPivot() {
   const tn = state.activeTable; if (!tn) return null;
-  if (!state.pksPivot[tn]) state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn));
+  if (!state.pksPivot[tn]) { state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn)); resolvePksKennerFilters(tn); }
   return state.pksPivot[tn];
+}
+// funk_/regio_/hybrid_kenner are value (multi-select) pre-filters like the Hauptplanungsgruppe one.
+// We can't know the values up front, so resolve them from the data: include every distinct value
+// except the "true"-like flags — i.e. keep the normal/non-special rows (funk_kenner ≠ True, etc.).
+async function resolvePksKennerFilters(tn) {
+  const table = state.tables.find(t => t.name === tn), pv = state.pksPivot[tn];
+  if (!table || !pv) return;
+  const kenner = ['funk_kenner', 'regio_kenner', 'hybrid_kenner'].filter(c => table.schema.some(s => s.name === c));
+  let added = false;
+  for (const col of kenner) {
+    if (fieldForCol(pv, col)) continue;                      // already set (restored from session or user-edited)
+    try {
+      const res = await runQuery(`SELECT DISTINCT ${qid(col)} AS v FROM ${qid(tn)} WHERE ${qid(col)} IS NOT NULL LIMIT 1000`);
+      const keep = res.rows.map(r => r.v).filter(v => !isTruthyFlag(v));
+      if (keep.length === 0) continue;                       // nothing non-true to keep → don't filter to empty
+      pv.filters.push({ col, filter: { type: 'values', included: new Set(keep), includeBlank: true } });
+      added = true;
+    } catch (e) { console.warn('PKS kenner filter resolve failed for', col, e.message); }
+  }
+  if (added) { scheduleSave(); if (state.mode === 'pks') refreshPivotView(); }
+}
+// A true/false flag can arrive as a boolean, 0/1, or a "True"/"Wahr"/"yes" string.
+function isTruthyFlag(v) {
+  if (v === true) return true;
+  if (typeof v === 'number' || typeof v === 'bigint') return Number(v) !== 0;
+  if (typeof v === 'string') { const s = v.trim().toLowerCase(); return s === 'true' || s === 't' || s === '1' || s === 'ja' || s === 'yes' || s === 'wahr'; }
+  return false;
 }
 function activePivot() { return state.mode === 'pks' ? ensurePksPivot() : state.pivot[state.activeTable]; }
 
@@ -982,7 +1009,6 @@ function pksPresetConfig(table) {
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
   pv.hideBelowPct = true;
   const f = [];
-  for (const col of ['funk_kenner', 'regio_kenner', 'hybrid_kenner']) if (has(col)) f.push({ col, filter: { type: 'text', op: 'eq', a: 'False', not: true, keepNull: true } });
   if (has('fn_planungshauptgruppe_pk')) f.push({ col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: new Set(['ET', 'DP']) } });
   if (has('td_bb_technik')) f.push({ col: 'td_bb_technik', filter: pksFiberFilter(false) });
   pv.filters = f;
@@ -1776,7 +1802,7 @@ function renderPivotToolbar() {
     el('span', null, tt('sortCols')), sortSelect('colSort', colSort),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
-    el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn)); else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
+    el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') { state.pksPivot[tn] = pksPresetConfig(state.tables.find(t => t.name === tn)); resolvePksKennerFilters(tn); } else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
     state.mode === 'pks'
       ? renderPksFiberToggle(pv)
       : el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
@@ -1993,25 +2019,22 @@ function renderPivotGrid() {
     return r === null ? '' : fmtPct(r);
   };
 
-  // "< 1%" pruning. A row/group is KEPT when at least one of its cells is ≥1% of that cell's COLUMN
-  // total (so a small row that is ≥1% within some column stays). This basis is deliberately
-  // independent of the "Show values as" mode, so switching between relative and absolute display
-  // never changes which rows are hidden. Anything below is pruned together with its whole subtree,
-  // at every level. Pruned subtrees are remembered so total rows show the real leftover, not 100%.
+  // "< X%" pruning. A row/group is KEPT when its share of the GRAND TOTAL (the Gesamtergebnis column,
+  // first value field) is ≥ the threshold — i.e. exactly the percentage shown in that column. This
+  // basis is independent of the "Show values as" mode, so switching display never changes which rows
+  // are hidden. Anything below is pruned together with its whole subtree, at every level. Pruned
+  // subtrees are remembered so total rows show the real leftover, not 100%.
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   if (pv.hideBelowPct) {
     const thr = Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100;
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
     const nodeKeeps = (n) => {
-      const rKey = safeJoin(n.vals);
-      for (const leafCol of sh.leafCols) {
-        const cKey = safeJoin(leafCol.vals), cell = cellMap.get(rKey + '#' + cKey), colTot = cellMap.get('#' + cKey);
-        if (!cell || !colTot) continue;
-        for (let vi = 0; vi < nValues; vi++) {
-          const base = Number(colTot[vi]);
-          if (base && Math.abs(Number(cell[vi]) / base) >= thr) return true;
-        }
+      const rowTot = cellMap.get(safeJoin(n.vals) + '#');   // this node's grand total (Gesamtergebnis)
+      if (!rowTot || !grandCellAll) return true;
+      for (let vi = 0; vi < nValues; vi++) {
+        const base = Number(grandCellAll[vi]);
+        if (base && Math.abs(Number(rowTot[vi]) / base) >= thr) return true;
       }
       return false;
     };
