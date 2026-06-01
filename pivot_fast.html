@@ -2055,9 +2055,13 @@ function renderPivotGrid() {
     };
     walkHide(sh.rowTree);
   }
-  // Visible columns: a column leaf/subtotal is keyed by its grand-total cell (#<cKey>) = its total over
-  // all rows. Empty columns vanish; with "< X%" on, sub-threshold columns vanish until it's lowered.
-  const visLeafCols = sh.leafCols.filter(lc => passesKeep(cellMap.get('#' + safeJoin(lc.vals))));
+  // Visible columns: a column is keyed by its grand-total cell (#<cKey>) = its total over all rows.
+  // Columns are hidden ONLY when entirely zero — never by the "< X%" threshold. A below-threshold
+  // column would still feed the subtotal/Gesamtergebnis columns, so its value would show up in the
+  // total with no matching cell in the detail columns (confusing). Rows can use the threshold because
+  // pruned rows are netted out of the totals (visibleTotal); there is no such netting for columns.
+  const colNonZero = (tot) => { if (!tot) return true; for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) return true; return false; };
+  const visLeafCols = sh.leafCols.filter(lc => colNonZero(cellMap.get('#' + safeJoin(lc.vals))));
 
   // Absolute totals for a total/subtotal/grand row with the pruned rows removed (full total minus
   // every pruned subtree that falls under this node), so totals reflect only the still-visible rows.
@@ -2355,7 +2359,10 @@ function buildPivotSheet(wb, opts = {}) {
     const walk = (nodes) => { for (const n of nodes) { if (passesKeep(cellMap.get(safeJoin(n.vals) + '#'))) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
     walk(sh.rowTree);
   }
-  const leafCols = reduced ? sh.leafCols.filter(lc => passesKeep(cellMap.get('#' + safeJoin(lc.vals)))) : sh.leafCols;
+  // Columns: hide only fully-zero ones (never by threshold) so the totals can't show a value that has
+  // no visible detail column — same rule as the on-screen grid. Rows still use the threshold (netted).
+  const colNonZero = (tot) => { if (!reduced || !tot) return true; for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) return true; return false; };
+  const leafCols = sh.leafCols.filter(lc => colNonZero(cellMap.get('#' + safeJoin(lc.vals))));
   const visibleTotal = (node, rKey, cKey) => {
     const full = cellMap.get(rKey + '#' + cKey);
     if (!reduced || !full || prunedRoots.length === 0) return full;
