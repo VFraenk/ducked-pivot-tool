@@ -2042,40 +2042,18 @@ function renderPivotGrid() {
     for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
     return false;
   };
-  // Visible columns first (depends only on column totals over all rows). A detail (non-subtotal) column
-  // is hidden when its total is zero or — with "< X%" on — below the threshold. Subtotal/grand columns
-  // are then COMPUTED from the visible detail columns under them (sumCols in the row loop), never read
-  // from the rollup, so a hidden column can't leave a value in a total with no matching detail cell.
-  const colKey = (lc) => safeJoin(lc.vals);
-  const visDetail = sh.leafCols.filter(lc => !lc.isColSubtotal && passesKeep(cellMap.get('#' + colKey(lc))));
-  const detailKeys = visDetail.map(colKey), detailKeySet = new Set(detailKeys);
-  const underGroup = (d, sub) => { const P = sub.depth + 1; for (let k = 0; k < P; k++) if (String(d.vals[k]) !== String(sub.vals[k])) return false; return true; };
-  const coverKeys = new Map();   // subtotal col key -> [detail cKeys it sums]
-  const visLeafCols = sh.leafCols.filter(lc => {
-    if (!lc.isColSubtotal) return detailKeySet.has(colKey(lc));
-    const cov = visDetail.filter(d => underGroup(d, lc)).map(colKey);
-    coverKeys.set(lc.key, cov);
-    return cov.length > 0;
-  });
-  // A row's total counted for pruning is its sum over the VISIBLE columns only, so a row that is empty
-  // (or, with "< X%" on, below threshold) once hidden columns are excluded is dropped — no blank rows.
-  const rowVisTotal = (rKey) => { let any = false; const out = new Array(nValues).fill(0); for (const ck of detailKeys) { const c = cellMap.get(rKey + '#' + ck); if (c) { any = true; for (let vi = 0; vi < nValues; vi++) { const x = Number(c[vi]); if (isFinite(x)) out[vi] += x; } } } return any ? out : null; };
+  // Prune rows by their grand total (Gesamtergebnis): fully-zero rows always go; with "< X%" on, rows
+  // below the threshold go too. Pruned subtrees are remembered so totals show the leftover, not 100%.
+  const GRAND = { key: '__root' };
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   {
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
-    const nodeKeeps = (n) => passesKeep(rowVisTotal(safeJoin(n.vals)));
-    const walkHide = (nodes) => {
-      for (const n of nodes) {
-        if (nodeKeeps(n)) walkHide(n.children);
-        else { prunedRoots.push(n); markSubtree(n); }
-      }
-    };
+    const nodeKeeps = (n) => passesKeep(cellMap.get(safeJoin(n.vals) + '#'));
+    const walkHide = (nodes) => { for (const n of nodes) { if (nodeKeeps(n)) walkHide(n.children); else { prunedRoots.push(n); markSubtree(n); } } };
     walkHide(sh.rowTree);
   }
-
-  // Absolute totals for a total/subtotal/grand row with the pruned rows removed (full total minus
-  // every pruned subtree that falls under this node), so totals reflect only the still-visible rows.
+  // Absolute totals with the pruned rows removed, so totals reflect only the still-visible rows.
   const visibleTotal = (node, rKey, cKey) => {
     const full = cellMap.get(rKey + '#' + cKey);
     if (!full || prunedRoots.length === 0) return full;
@@ -2088,6 +2066,12 @@ function renderPivotGrid() {
     }
     return out;
   };
+  // Hide a column only when it is empty across the VISIBLE rows (its grand total, net of pruned rows, is
+  // zero). A column with data in any visible row stays — so its value is never stranded in a total with
+  // no cell, and a collapsed group agrees with its expanded detail. Totals stay as the rollup (net of
+  // pruned rows): hidden columns contribute 0 over the visible rows, so every total matches the cells.
+  const colNonEmpty = (lc) => { const t = visibleTotal(GRAND, '', safeJoin(lc.vals)); if (!t) return false; for (let vi = 0; vi < nValues; vi++) if (Number(t[vi]) !== 0) return true; return false; };
+  const visLeafCols = sh.leafCols.filter(colNonEmpty);
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
@@ -2178,14 +2162,10 @@ function renderPivotGrid() {
 
     const rKey = isGrand ? '' : safeJoin(node.vals);
     const isTotalRow = isGrand || isSubtotal; // total rows show the leftover after pruning
-    // One value source for this row: detail cells come straight from the (row-netted) cellMap; subtotal
-    // and grand columns are summed from the VISIBLE detail columns so the totals always match the cells.
-    const cellAt = (cKey) => isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
-    const sumCols = (cKeys) => { let any = false; const out = new Array(nValues).fill(0); for (const ck of cKeys) { const c = cellAt(ck); if (c) { any = true; for (let vi = 0; vi < nValues; vi++) { const x = Number(c[vi]); if (isFinite(x)) out[vi] += x; } } } return any ? out : null; };
     for (const leafCol of visLeafCols) {
       const cKey = safeJoin(leafCol.vals);
+      const cell = isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
       const isColSub = !!leafCol.isColSubtotal;
-      const cell = isColSub ? sumCols(coverKeys.get(leafCol.key)) : cellAt(cKey);
       let cellStyle = '';
       if (isGrand) {
         cellStyle = 'background:var(--pv-grand); font-weight:700;';
@@ -2199,7 +2179,7 @@ function renderPivotGrid() {
       for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: cellStyle }, cellText(cell, vi, rKey, cKey))); }
     }
     if (hasColDims) {
-      const grandCell = sumCols(detailKeys);   // Gesamtergebnis = sum of the visible detail columns
+      const grandCell = isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#');
       for (let vi = 0; vi < sh.valueDefs.length; vi++) { tr.appendChild(el('td', { style: isGrand ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : isSubtotal ? 'background:var(--pv-grand); font-weight:700; border-left:2px solid var(--pv-border);' : 'background:var(--pv-sub-col); font-weight:600; border-left:2px solid var(--pv-border);' }, cellText(grandCell, vi, rKey, ''))); }
     }
     tbody.appendChild(tr);
@@ -2368,26 +2348,11 @@ function buildPivotSheet(wb, opts = {}) {
     for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
     return false;
   };
-  // Columns (reduced sheet): hide empty / below-threshold detail columns just like the grid, and compute
-  // subtotal/grand columns from the visible detail columns (coverKeys) so totals match the cells shown.
-  const colKey = (lc) => safeJoin(lc.vals);
-  const keepDetail = (lc) => !reduced || passesKeep(cellMap.get('#' + colKey(lc)));
-  const visDetail = sh.leafCols.filter(lc => !lc.isColSubtotal && keepDetail(lc));
-  const detailKeys = visDetail.map(colKey), detailKeySet = new Set(detailKeys);
-  const underGroup = (d, sub) => { const P = sub.depth + 1; for (let k = 0; k < P; k++) if (String(d.vals[k]) !== String(sub.vals[k])) return false; return true; };
-  const coverKeys = new Map();
-  const leafCols = sh.leafCols.filter(lc => {
-    if (!lc.isColSubtotal) return !reduced || detailKeySet.has(colKey(lc));
-    const cov = visDetail.filter(d => underGroup(d, lc)).map(colKey);
-    coverKeys.set(lc.key, cov);
-    return !reduced || cov.length > 0;
-  });
-  // Prune rows by their sum over VISIBLE columns, so rows empty once hidden columns are excluded vanish.
-  const rowVisTotal = (rKey) => { let any = false; const out = new Array(nValues).fill(0); for (const ck of detailKeys) { const c = cellMap.get(rKey + '#' + ck); if (c) { any = true; for (let vi = 0; vi < nValues; vi++) { const x = Number(c[vi]); if (isFinite(x)) out[vi] += x; } } } return any ? out : null; };
+  const GRAND = { key: '__root' };
   const hiddenRowKeys = new Set(), prunedRoots = [];
   if (reduced) {
     const mark = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(mark); };
-    const walk = (nodes) => { for (const n of nodes) { if (passesKeep(rowVisTotal(safeJoin(n.vals)))) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
+    const walk = (nodes) => { for (const n of nodes) { if (passesKeep(cellMap.get(safeJoin(n.vals) + '#'))) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
     walk(sh.rowTree);
   }
   const visibleTotal = (node, rKey, cKey) => {
@@ -2401,6 +2366,10 @@ function buildPivotSheet(wb, opts = {}) {
     }
     return out;
   };
+  // Reduced sheet: hide a column only when it is empty across the visible rows (same rule as the grid),
+  // so totals stay as the rollup (net of pruned rows) yet always match the visible cells.
+  const colNonEmpty = (lc) => { if (!reduced) return true; const t = visibleTotal(GRAND, '', safeJoin(lc.vals)); if (!t) return false; for (let vi = 0; vi < nValues; vi++) if (Number(t[vi]) !== 0) return true; return false; };
+  const leafCols = sh.leafCols.filter(colNonEmpty);
   const cellVal = (v) => (reduced && v !== null && v !== undefined && Number(v) === 0) ? null : v;
   const HEADER_ROWS = Math.max(1, D) + (nValues > 1 ? 1 : 0);
   const dataStartRow = HEADER_ROWS + 1;
@@ -2497,15 +2466,13 @@ function buildPivotSheet(wb, opts = {}) {
       if (bold) cell.font = { bold: true };
     };
     const isTotalRow = isGrand || isSub;
-    const cellAt = (cKey) => isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
-    const sumCols = (cKeys) => { let any = false; const out = new Array(nValues).fill(0); for (const ck of cKeys) { const c = cellAt(ck); if (c) { any = true; for (let vi = 0; vi < nValues; vi++) { const x = Number(c[vi]); if (isFinite(x)) out[vi] += x; } } } return any ? out : null; };
     for (let i = 0; i < leafCols.length; i++) {
-      const lc = leafCols[i];
-      const cell = (reduced && lc.isColSubtotal) ? sumCols(coverKeys.get(lc.key)) : cellAt(safeJoin(lc.vals));
-      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(leafColStart(i) + vi), cellVal(cell ? cell[vi] : null), !!lc.isColSubtotal);
+      const cKey = safeJoin(leafCols[i].vals);
+      const cell = isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
+      for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(leafColStart(i) + vi), cellVal(cell ? cell[vi] : null), !!leafCols[i].isColSubtotal);
     }
     if (hasColDims) {
-      const gc = reduced ? sumCols(detailKeys) : (isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#'));
+      const gc = isTotalRow ? visibleTotal(node, rKey, '') : cellMap.get(rKey + '#');
       for (let vi = 0; vi < nValues; vi++) writeVal(row.getCell(gtColStart + vi), cellVal(gc ? gc[vi] : null), true);
     }
     r++;
