@@ -2019,31 +2019,27 @@ function renderPivotGrid() {
     return (r === null || Math.abs(r) < 0.0005) ? '' : fmtPct(r);    // …nor a value that rounds to 0,0 %
   };
 
-  // Row pruning. Fully-zero rows (every value field exactly 0) are ALWAYS dropped — a 0 row carries no
-  // information. When "< X%" is on we additionally drop rows whose share of the GRAND TOTAL (the
-  // Gesamtergebnis column, first value field) is below the threshold — i.e. exactly the percentage
-  // shown in that column. This basis is independent of the "Show values as" mode, so switching display
-  // never changes which rows are hidden. Anything below is pruned together with its whole subtree, at
-  // every level. Pruned subtrees are remembered so total rows show the real leftover, not 100%.
+  // Row & column pruning. Anything that is fully zero (every value field exactly 0) is ALWAYS dropped —
+  // it carries no information. When "< X%" is on we additionally drop rows/columns whose share of the
+  // GRAND TOTAL (first value field) is below the threshold, so lowering the threshold reveals more.
+  // This basis is independent of the "Show values as" mode. Pruned row subtrees are remembered so
+  // total rows show the real leftover, not 100%.
+  const thrActive = pv.hideBelowPct;
+  const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
+  const passesKeep = (tot) => {
+    if (!tot || !grandCellAll) return true;
+    let allZero = true;
+    for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) { allZero = false; break; }
+    if (allZero) return false;                             // always drop a fully-zero row/column
+    if (!thrActive) return true;
+    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
+    return false;
+  };
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   {
-    const thrActive = pv.hideBelowPct;
-    const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
-    const nodeKeeps = (n) => {
-      const rowTot = cellMap.get(safeJoin(n.vals) + '#');   // this node's grand total (Gesamtergebnis)
-      if (!rowTot || !grandCellAll) return true;
-      let allZero = true;
-      for (let vi = 0; vi < nValues; vi++) if (Number(rowTot[vi]) !== 0) { allZero = false; break; }
-      if (allZero) return false;                            // always drop a row that is 0 everywhere
-      if (!thrActive) return true;
-      for (let vi = 0; vi < nValues; vi++) {
-        const base = Number(grandCellAll[vi]);
-        if (base && Math.abs(Number(rowTot[vi]) / base) >= thr) return true;
-      }
-      return false;
-    };
+    const nodeKeeps = (n) => passesKeep(cellMap.get(safeJoin(n.vals) + '#'));   // node grand total (Gesamtergebnis col)
     const walkHide = (nodes) => {
       for (const n of nodes) {
         if (nodeKeeps(n)) walkHide(n.children);
@@ -2052,6 +2048,9 @@ function renderPivotGrid() {
     };
     walkHide(sh.rowTree);
   }
+  // Visible columns: a column leaf/subtotal is keyed by its grand-total cell (#<cKey>) = its total over
+  // all rows. Empty columns vanish; with "< X%" on, sub-threshold columns vanish until it's lowered.
+  const visLeafCols = sh.leafCols.filter(lc => passesKeep(cellMap.get('#' + safeJoin(lc.vals))));
 
   // Absolute totals for a total/subtotal/grand row with the pruned rows removed (full total minus
   // every pruned subtree that falls under this node), so totals reflect only the still-visible rows.
@@ -2076,8 +2075,8 @@ function renderPivotGrid() {
     if (!hasColDims) { tr.appendChild(el('th', { colspan: nValues, style:`background:${pvHdrBg(0)}; color:#fff; font-weight:700;` }, tt('grandTotal'))); thead.appendChild(tr); continue; }
 
     let i = 0;
-    while (i < sh.leafCols.length) {
-      const col = sh.leafCols[i];
+    while (i < visLeafCols.length) {
+      const col = visLeafCols[i];
       if (col.isColSubtotal && lvl === col.depth) {
         const rs = colHeaderRows - lvl;
         // col-subtotal header: one shade lighter than the depth it belongs to
@@ -2088,8 +2087,8 @@ function renderPivotGrid() {
       if (!col.isColSubtotal && lvl >= col.vals.length) { i++; continue; }
 
       let j = i;
-      while (j < sh.leafCols.length) {
-        const nextCol = sh.leafCols[j];
+      while (j < visLeafCols.length) {
+        const nextCol = visLeafCols[j];
         if (nextCol.isColSubtotal && lvl >= nextCol.depth) break;
         if (!nextCol.isColSubtotal && lvl >= nextCol.vals.length) break;
         if (String(nextCol.vals[lvl]) !== String(col.vals[lvl])) break;
@@ -2114,7 +2113,7 @@ function renderPivotGrid() {
   if (nValues > 1) {
     const tr = el('tr');
     const deepestLvl = Math.max(0, sh.colDims.length - 1);
-    for (const col of sh.leafCols) {
+    for (const col of visLeafCols) {
       const bg = col.isColSubtotal ? pvHdrBg(col.depth + 1) : pvHdrBg(deepestLvl);
       for (const vdef of sh.valueDefs) tr.appendChild(el('th', { style: `background:${bg}; color:#fff; font-weight:500;` }, `${vdef.agg.replace('_',' ')}(${vdef.col})`));
     }
@@ -2157,7 +2156,7 @@ function renderPivotGrid() {
 
     const rKey = isGrand ? '' : safeJoin(node.vals);
     const isTotalRow = isGrand || isSubtotal; // total rows show the leftover after pruning
-    for (const leafCol of sh.leafCols) {
+    for (const leafCol of visLeafCols) {
       const cKey = safeJoin(leafCol.vals);
       const cell = isTotalRow ? visibleTotal(node, rKey, cKey) : cellMap.get(rKey + '#' + cKey);
       const isColSub = !!leafCol.isColSubtotal;
