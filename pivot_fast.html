@@ -934,8 +934,13 @@ async function registerParquet(buf, fileName, opts = {}) {
   if (prefs) applyTablePrefs(tableName, prefs);
   if (!state.activeTable) state.activeTable = tableName;
   if (persist && state.settings.rememberFiles) {
-    try { await idbPut(tableName, { fileName, buffer: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) }); }
-    catch (e) { console.warn('Could not persist file to IndexedDB:', e); }
+    // NB: registerFileBuffer above transfers (detaches) buf.buffer to the worker, so we can no
+    // longer read it here. Copy the bytes back out of DuckDB instead (same as the rememberFiles
+    // toggle) — otherwise the IndexedDB write silently fails and nothing survives a reload.
+    try {
+      const out = await state.db.copyFileToBuffer(regName);
+      await idbPut(tableName, { fileName, buffer: out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) });
+    } catch (e) { console.warn('Could not persist file to IndexedDB:', e); }
   }
   return tableName;
 }
