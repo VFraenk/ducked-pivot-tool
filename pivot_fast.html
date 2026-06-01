@@ -2014,24 +2014,30 @@ function renderPivotGrid() {
   const cellText = (cell, vi, rKey, cKey) => {
     const v = cell ? cell[vi] : null;
     if (v === null || v === undefined) return '';
-    if (showAs === 'abs') return fmtNum(v);
+    if (showAs === 'abs') return Number(v) === 0 ? '' : fmtNum(v);   // never render a bare 0
     const r = ratioFor(v, vi, rKey, cKey);
-    return r === null ? '' : fmtPct(r);
+    return (r === null || Math.abs(r) < 0.0005) ? '' : fmtPct(r);    // …nor a value that rounds to 0,0 %
   };
 
-  // "< X%" pruning. A row/group is KEPT when its share of the GRAND TOTAL (the Gesamtergebnis column,
-  // first value field) is ≥ the threshold — i.e. exactly the percentage shown in that column. This
-  // basis is independent of the "Show values as" mode, so switching display never changes which rows
-  // are hidden. Anything below is pruned together with its whole subtree, at every level. Pruned
-  // subtrees are remembered so total rows show the real leftover, not 100%.
+  // Row pruning. Fully-zero rows (every value field exactly 0) are ALWAYS dropped — a 0 row carries no
+  // information. When "< X%" is on we additionally drop rows whose share of the GRAND TOTAL (the
+  // Gesamtergebnis column, first value field) is below the threshold — i.e. exactly the percentage
+  // shown in that column. This basis is independent of the "Show values as" mode, so switching display
+  // never changes which rows are hidden. Anything below is pruned together with its whole subtree, at
+  // every level. Pruned subtrees are remembered so total rows show the real leftover, not 100%.
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
-  if (pv.hideBelowPct) {
-    const thr = Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100;
+  {
+    const thrActive = pv.hideBelowPct;
+    const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
     const nodeKeeps = (n) => {
       const rowTot = cellMap.get(safeJoin(n.vals) + '#');   // this node's grand total (Gesamtergebnis)
       if (!rowTot || !grandCellAll) return true;
+      let allZero = true;
+      for (let vi = 0; vi < nValues; vi++) if (Number(rowTot[vi]) !== 0) { allZero = false; break; }
+      if (allZero) return false;                            // always drop a row that is 0 everywhere
+      if (!thrActive) return true;
       for (let vi = 0; vi < nValues; vi++) {
         const base = Number(grandCellAll[vi]);
         if (base && Math.abs(Number(rowTot[vi]) / base) >= thr) return true;
