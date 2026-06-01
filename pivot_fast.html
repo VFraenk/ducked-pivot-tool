@@ -2033,27 +2033,24 @@ function renderPivotGrid() {
   // total rows show the real leftover, not 100%.
   const thrActive = pv.hideBelowPct;
   const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
-  // When the total column shows a share of the grand total (pctCol / pctGrand), a row under 0.05%
-  // rounds to "0,0 %" and looks completely empty — drop it too (display-rounding floor). Absolute and
-  // per-row-% views keep exact non-zero rows; the "< X%" threshold, when larger, takes precedence.
-  const keepFloor = Math.max(thr, (showAs === 'pctCol' || showAs === 'pctGrand') ? 0.0005 : 0);
-  const passesKeep = (tot) => {
-    if (!tot || !grandCellAll) return true;
-    let allZero = true;
-    for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) { allZero = false; break; }
-    if (allZero) return false;                             // always drop a fully-zero row/column
-    if (keepFloor === 0) return true;
-    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= keepFloor) return true; }
-    return false;
-  };
-  // Prune rows by their grand total (Gesamtergebnis): fully-zero rows always go; with "< X%" on, rows
-  // below the threshold go too. Pruned subtrees are remembered so totals show the leftover, not 100%.
-  const GRAND = { key: '__root' };
+  // "Empty" is measured by magnitude, not the net total: with negative values a row/column whose + and -
+  // cells cancel to a net of 0 still HAS data and must stay — and its cells must keep counting toward the
+  // column %, otherwise dropping it would pull a column below 100%. The "< X%" threshold (share of the
+  // grand total) only applies when explicitly set; with no filter every row that has data stays.
+  const cellsNonZero = (cells) => { if (!cells) return false; for (let vi = 0; vi < nValues; vi++) if (Number(cells[vi]) !== 0) return true; return false; };
+  const rowHasData = (rKey) => { for (const lc of sh.leafCols) { if (lc.isColSubtotal) continue; if (cellsNonZero(cellMap.get(rKey + '#' + safeJoin(lc.vals)))) return true; } return false; };
   const hiddenRowKeys = new Set();
   const prunedRoots = [];
   {
     const markSubtree = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(markSubtree); };
-    const nodeKeeps = (n) => passesKeep(cellMap.get(safeJoin(n.vals) + '#'));
+    const nodeKeeps = (n) => {
+      const rKey = safeJoin(n.vals);
+      if (!rowHasData(rKey)) return false;                 // drop rows with no data anywhere
+      if (!thrActive || thr <= 0) return true;             // no filter -> keep every data row (cols = 100%)
+      const tot = cellMap.get(rKey + '#'); if (!tot || !grandCellAll) return true;
+      for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
+      return false;
+    };
     const walkHide = (nodes) => { for (const n of nodes) { if (nodeKeeps(n)) walkHide(n.children); else { prunedRoots.push(n); markSubtree(n); } } };
     walkHide(sh.rowTree);
   }
@@ -2070,12 +2067,12 @@ function renderPivotGrid() {
     }
     return out;
   };
-  // Hide a column only when it is empty across the VISIBLE rows (its grand total, net of pruned rows, is
-  // zero). A column with data in any visible row stays — so its value is never stranded in a total with
-  // no cell, and a collapsed group agrees with its expanded detail. Totals stay as the rollup (net of
-  // pruned rows): hidden columns contribute 0 over the visible rows, so every total matches the cells.
-  const colNonEmpty = (lc) => { const t = visibleTotal(GRAND, '', safeJoin(lc.vals)); if (!t) return false; for (let vi = 0; vi < nValues; vi++) if (Number(t[vi]) !== 0) return true; return false; };
-  const visLeafCols = sh.leafCols.filter(colNonEmpty);
+  // Hide a column only when it has NO data across the visible rows (magnitude, not net — a column whose
+  // +/- cancel still shows). A column with data in any visible row stays, so totals (the rollup, net of
+  // pruned rows) match the visible cells and a collapsed group agrees with its expanded detail.
+  const visLeafRows = sh.leafRows.filter(r => !hiddenRowKeys.has(r.key));
+  const colHasData = (lc) => { const cKey = safeJoin(lc.vals); for (const r of visLeafRows) if (cellsNonZero(cellMap.get(safeJoin(r.vals) + '#' + cKey))) return true; return false; };
+  const visLeafCols = sh.leafCols.filter(colHasData);
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
@@ -2342,21 +2339,22 @@ function buildPivotSheet(wb, opts = {}) {
   // rows & columns, blank 0 cells, and net pruned rows out of the totals. Full sheet keeps everything.
   const thrActive = reduced && pv.hideBelowPct;
   const thr = thrActive ? Math.max(0, (typeof pv.hideThresholdPct === 'number' ? pv.hideThresholdPct : PIVOT_HIDE_DEFAULT_PCT)) / 100 : 0;
-  const passesKeep = (tot) => {
-    if (!reduced) return true;
-    if (!tot || !grandCellAll) return true;
-    let allZero = true;
-    for (let vi = 0; vi < nValues; vi++) if (Number(tot[vi]) !== 0) { allZero = false; break; }
-    if (allZero) return false;
-    if (!thrActive) return true;
-    for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
-    return false;
-  };
-  const GRAND = { key: '__root' };
+  // Same emptiness rule as the grid: measure by magnitude (so +/- cancellation rows & columns stay),
+  // drop fully-empty rows always, and below-threshold rows by share of the grand total when "< X%" is on.
+  const cellsNonZero = (cells) => { if (!cells) return false; for (let vi = 0; vi < nValues; vi++) if (Number(cells[vi]) !== 0) return true; return false; };
+  const rowHasData = (rKey) => { for (const lc of sh.leafCols) { if (lc.isColSubtotal) continue; if (cellsNonZero(cellMap.get(rKey + '#' + safeJoin(lc.vals)))) return true; } return false; };
   const hiddenRowKeys = new Set(), prunedRoots = [];
   if (reduced) {
     const mark = (n) => { hiddenRowKeys.add(n.key); n.children.forEach(mark); };
-    const walk = (nodes) => { for (const n of nodes) { if (passesKeep(cellMap.get(safeJoin(n.vals) + '#'))) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
+    const keep = (n) => {
+      const rKey = safeJoin(n.vals);
+      if (!rowHasData(rKey)) return false;
+      if (!thrActive || thr <= 0) return true;
+      const tot = cellMap.get(rKey + '#'); if (!tot || !grandCellAll) return true;
+      for (let vi = 0; vi < nValues; vi++) { const base = Number(grandCellAll[vi]); if (base && Math.abs(Number(tot[vi]) / base) >= thr) return true; }
+      return false;
+    };
+    const walk = (nodes) => { for (const n of nodes) { if (keep(n)) walk(n.children); else { prunedRoots.push(n); mark(n); } } };
     walk(sh.rowTree);
   }
   const visibleTotal = (node, rKey, cKey) => {
@@ -2370,10 +2368,10 @@ function buildPivotSheet(wb, opts = {}) {
     }
     return out;
   };
-  // Reduced sheet: hide a column only when it is empty across the visible rows (same rule as the grid),
-  // so totals stay as the rollup (net of pruned rows) yet always match the visible cells.
-  const colNonEmpty = (lc) => { if (!reduced) return true; const t = visibleTotal(GRAND, '', safeJoin(lc.vals)); if (!t) return false; for (let vi = 0; vi < nValues; vi++) if (Number(t[vi]) !== 0) return true; return false; };
-  const leafCols = sh.leafCols.filter(colNonEmpty);
+  // Hide a column only when it has no data across the visible rows (magnitude, not net — same as grid).
+  const visLeafRows = reduced ? sh.leafRows.filter(r => !hiddenRowKeys.has(r.key)) : sh.leafRows;
+  const colHasData = (lc) => { if (!reduced) return true; const cKey = safeJoin(lc.vals); for (const r of visLeafRows) if (cellsNonZero(cellMap.get(safeJoin(r.vals) + '#' + cKey))) return true; return false; };
+  const leafCols = sh.leafCols.filter(colHasData);
   const cellVal = (v) => (reduced && v !== null && v !== undefined && Number(v) === 0) ? null : v;
   const HEADER_ROWS = Math.max(1, D) + (nValues > 1 ? 1 : 0);
   const dataStartRow = HEADER_ROWS + 1;
