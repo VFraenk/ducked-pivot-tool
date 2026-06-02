@@ -431,7 +431,7 @@ import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0
 /* ============================================================================
  * TABLE OF CONTENTS  —  this app is one portable HTML file (open it directly,
  * no build/server needed). To jump to a section, search (Ctrl/Cmd-F) for its
- * banner title below, e.g. "PRODUCTS MODE". Sections appear in this order:
+ * banner title below, e.g. "PIVOT MODE". Sections appear in this order:
  *
  *   STATE ................. central `state` object, locales, constants
  *   I18N .................. German/English UI strings (tt())
@@ -446,7 +446,6 @@ import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0
  *   TABLE MODE ............ raw grid + paging
  *   FILTER DIALOG ......... shared values/num/text/date dialog (all modes)
  *   PIVOT MODE ............ pivot + PKS report
- *   PRODUCTS MODE ......... per-product-cluster report (products as columns)
  *   SQL CONSOLE MODE ...... CodeMirror editor
  *   EXPORT ................ CSV/JSON/Parquet/Excel
  *   SETTINGS & SESSION MENUS
@@ -461,7 +460,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null, productsData: null, productsShowAs: 'rel',
+  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -489,21 +488,7 @@ const I18N = {
     initializing: 'wird initialisiert…', ready: 'DuckDB bereit', failed: 'DuckDB FEHLER', restoring: 'wird wiederhergestellt…',
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
-    table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
-    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Young / Online / Winback je tsc_pks_product_cluster — Filter & „< X %" werden 1:1 aus dem PKS-Pivot übernommen',
-    prodFromPks: 'Aus PKS-Pivot:', prodFromPksHint: 'Filter und „< X %"-Einstellung werden 1:1 aus dem PKS-Pivot übernommen. Zum Ändern den PKS-Tab nutzen.', prodNoFilters: '(keine Filter)',
-    prodViewFull: 'Vollständig — alle Produkte ({0})', prodViewFiltered: 'Gefiltert — < {0} % ausgeblendet ({1} Produkte)', prodMeasureNote: '„< X %"-Basis: Anteil von {0} am Gesamt',
-    prodSheetFull: 'Vollständig', prodSheetFiltered: 'Gefiltert < {0}%',
-    prodMeasure: 'Nettovertriebsleistung', prodMeasureHint: 'Σ sum_td_nettovertriebsleistung — Basis für die „< X %"-Filterung',
-    prodMetric: 'Kennzahl', prodTotalCol: 'Gesamt', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Sonstige',
-    prodShowAs: 'Werte:', prodAbs: 'Absolut', prodRel: 'Relativ', prodPreset: 'Vorfilter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Filter bearbeiten (klicken)', prodExcel: 'Excel ⤓',
-    prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
-    prodOnlineGroup: 'Online', prodOnlineTotal: 'Online gesamt',
-    prodOnlineIntPct: 'dav. Intern %', prodOnlineIntAbs: 'dav. Intern', prodOnlineExtPct: 'dav. Extern %', prodOnlineExtAbs: 'dav. Extern',
-    prodColWinback: 'Winback-Anteil', prodAddFilter: '+ Filter hinzufügen',
-    prodTotal: 'Gesamt (alle Produkte)', prodNoCluster: 'Spalte „tsc_pks_product_cluster" in dieser Tabelle nicht gefunden.', prodNoData: 'Keine Daten.',
-    prodYoungHint: 'JA / (JA + NEIN) aus fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / alle Kanäle (kanal)', prodWinbackHint: '1 / (0 + 1) aus winback_kenner',
-    prodIntHint: 'INT intern PK / alle Kanäle (kanal)', prodExtHint: 'INT extern PK / alle Kanäle (kanal)',
+    table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
     resetPreset: 'Zurücksetzen', fiberLabel: 'Technik:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: „Ohne Fiber" = ≠ Fiber, „Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
     sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
@@ -563,21 +548,7 @@ const I18N = {
     initializing: 'initializing…', ready: 'duckdb ready', failed: 'duckdb FAILED', restoring: 'restoring…',
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
-    table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
-    prodTitle: 'Product metrics', prodSubtitle: 'Young / Online / Winback per tsc_pks_product_cluster — filters & "< X %" taken 1:1 from the PKS pivot',
-    prodFromPks: 'From PKS pivot:', prodFromPksHint: 'Filters and the "< X %" setting are taken 1:1 from the PKS pivot. Change them in the PKS tab.', prodNoFilters: '(no filters)',
-    prodViewFull: 'Full — all products ({0})', prodViewFiltered: 'Filtered — < {0} % hidden ({1} products)', prodMeasureNote: '"< X %" basis: share of {0} of the total',
-    prodSheetFull: 'Full', prodSheetFiltered: 'Filtered < {0}%',
-    prodMeasure: 'Nettovertriebsleistung', prodMeasureHint: 'Σ sum_td_nettovertriebsleistung — basis for the "< X %" filtering',
-    prodMetric: 'Metric', prodTotalCol: 'Total', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Other',
-    prodShowAs: 'Values:', prodAbs: 'Absolute', prodRel: 'Relative', prodPreset: 'Pre-filter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Edit filter (click)', prodExcel: 'Excel ⤓',
-    prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
-    prodOnlineGroup: 'Online', prodOnlineTotal: 'Online total',
-    prodOnlineIntPct: 'thereof Intern %', prodOnlineIntAbs: 'thereof Intern', prodOnlineExtPct: 'thereof Extern %', prodOnlineExtAbs: 'thereof Extern',
-    prodColWinback: 'Winback share', prodAddFilter: '+ Add filter',
-    prodTotal: 'Total (all products)', prodNoCluster: 'Column "tsc_pks_product_cluster" not found in this table.', prodNoData: 'No data.',
-    prodYoungHint: 'YES / (YES + NO) from fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / all channels (kanal)', prodWinbackHint: '1 / (0 + 1) from winback_kenner',
-    prodIntHint: 'INT intern PK / all channels (kanal)', prodExtHint: 'INT extern PK / all channels (kanal)',
+    table: 'Table', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
     resetPreset: 'Reset', fiberLabel: 'Tech:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: "Ohne Fiber" = ≠ Fiber, "Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
     sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
@@ -763,7 +734,7 @@ function collectPrefs() {
   }
   return {
     version: 1,
-    global: { mode: state.mode, pageSize: state.pageSize, productsShowAs: state.productsShowAs, sidebarCollapsed: $('#sidebar')?.classList.contains('collapsed') || false, ...state.settings },
+    global: { mode: state.mode, pageSize: state.pageSize, sidebarCollapsed: $('#sidebar')?.classList.contains('collapsed') || false, ...state.settings },
     activeTable: state.activeTable,
     sqlText: state.sqlText,
     tables,
@@ -1158,7 +1129,6 @@ async function refreshTableView() {
 async function refreshActiveView() {
   if (state.mode === 'table') return refreshTableView();
   if (state.mode === 'pivot' || state.mode === 'pks') return refreshPivotView();
-  if (state.mode === 'products') return refreshProductsView();
 }
 
 // RENDER HELPERS
@@ -1210,12 +1180,10 @@ function renderContent() {
     el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, tt('table')),
     el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, tt('pivot')),
     el('button', { class: 'mode-tab' + (state.mode==='pks'?' active':''), onclick: () => switchMode('pks') }, tt('pks')),
-    el('button', { class: 'mode-tab' + (state.mode==='products'?' active':''), onclick: () => switchMode('products') }, tt('products')),
     el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, tt('sql'))
   ));
   if (state.mode === 'table') root.appendChild(renderTableMode());
   else if (state.mode === 'pivot' || state.mode === 'pks') root.appendChild(renderPivotMode());
-  else if (state.mode === 'products') root.appendChild(renderProductsMode());
   else if (state.mode === 'sql') root.appendChild(renderSQLMode());
 }
 
@@ -1225,7 +1193,7 @@ function switchMode(m) {
   if (m === 'pivot' || m === 'pks') { sidebar.classList.add('collapsed'); toggleBtn.textContent = tt('schemaHide'); }
   else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = tt('schemaShow'); }
   renderContent();
-  if (m === 'table') refreshTableView(); if (m === 'pivot' || m === 'pks') setTimeout(() => refreshPivotView(), 0); if (m === 'products') setTimeout(() => refreshProductsView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
+  if (m === 'table') refreshTableView(); if (m === 'pivot' || m === 'pks') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
   scheduleSave();
 }
 
@@ -2278,248 +2246,6 @@ function fmtPct(ratio) {
 }
 
 // ============================================================
-// PRODUCTS MODE
-// A fixed report, per tsc_pks_product_cluster, of the Young / Online / Winback
-// shares. It mirrors the PKS pivot 1:1: the same filters (kenner, Planungs-
-// hauptgruppe, the Fiber toggle, anything the user set there) AND the same
-// "< X %" setting. Two outputs are shown: the FULL view (all product clusters)
-// and the FILTERED view (clusters below the PKS "< X %" share threshold hidden).
-// ============================================================
-const PRODUCTS_CLUSTER_COL = 'tsc_pks_product_cluster';
-
-// The live PKS pivot for the active table (created from preset if missing), plus
-// its kenner value-filters resolved. Returns the pivot so callers read its
-// filters / values / hideThresholdPct directly — the single source of truth.
-async function ensureProductsPksPivot(tn) {
-  const pv = ensurePksPivot();
-  if (pv) await resolvePksKennerFilters(tn);   // idempotent; fills funk_/regio_/hybrid_kenner
-  return pv;
-}
-// The PKS pivot's active filters as a {col: filter} map (filters tile + any field filters).
-function pksFilterMap(pv) {
-  const m = {}; if (!pv) return m;
-  for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) m[f.col] = f.filter;
-  return m;
-}
-// The aggregate behind the "< X %" share basis = the PKS pivot's first value field
-// (e.g. SUM(sum_td_nettovertriebsleistung)), falling back to a row count.
-function pksMeasureExpr(pv, table) {
-  const v = pv && pv.values && pv.values[0];
-  if (v && table.schema.some(c => c.name === v.col)) {
-    if (v.agg === 'COUNT_DISTINCT') return `COUNT(DISTINCT ${qid(v.col)})`;
-    if (v.agg === 'COUNT') return `COUNT(${qid(v.col)})`;
-    return `${v.agg}(${qid(v.col)})`;
-  }
-  return 'COUNT(*)';
-}
-
-// Custom product ordering: Total first, then by technology group
-// (kupfer → fiber_neu → fiber_alt → other), and within each group by tariff
-// size (s → m → l → xl → xxl → xxxl), unknown suffixes last by name.
-const PRODUCTS_ORDER = `is_total DESC,
-    CASE
-      WHEN CAST(product AS VARCHAR) ILIKE '%kupfer%' THEN 0
-      WHEN CAST(product AS VARCHAR) ILIKE '%fiber_neu%' THEN 1
-      WHEN CAST(product AS VARCHAR) ILIKE '%fiber_alt%' THEN 2
-      ELSE 3
-    END,
-    CASE lower(regexp_extract(CAST(product AS VARCHAR), '[^_]+$'))
-      WHEN 's' THEN 0 WHEN 'm' THEN 1 WHEN 'l' THEN 2 WHEN 'xl' THEN 3 WHEN 'xxl' THEN 4 WHEN 'xxxl' THEN 5 ELSE 9
-    END,
-    product`;
-
-function productsQuery(table, tn, pv) {
-  const cols = new Set(table.schema.map(c => c.name)), has = (c) => cols.has(c);
-  const prod = qid(PRODUCTS_CLUSTER_COL);
-  // When a source column is absent we emit 0 so the metric simply shows blank.
-  const young = (c) => has('fn_young_tarif_text')
-    ? `COUNT(*) FILTER (WHERE upper(trim(CAST(${qid('fn_young_tarif_text')} AS VARCHAR))) IN (${c}))` : '0';
-  const kanal = (c) => has('kanal') ? `COUNT(*) FILTER (WHERE ${c})` : '0';
-  const wb = (c) => has('winback_kenner')
-    ? `COUNT(*) FILTER (WHERE lower(CAST(${qid('winback_kenner')} AS VARCHAR)) IN (${c}))` : '0';
-  const where = buildWhere(table, pksFilterMap(pv));   // 1:1 from the PKS pivot
-  return `SELECT
-      ${prod} AS product,
-      GROUPING(${prod}) AS is_total,
-      COUNT(*) AS n,
-      ${pksMeasureExpr(pv, table)} AS msr,
-      ${young("'JA'")} AS young_ja,
-      ${young("'JA','NEIN'")} AS young_tot,
-      ${kanal(`${qid('kanal')} = 'INT intern PK'`)} AS int_intern,
-      ${kanal(`${qid('kanal')} = 'INT extern PK'`)} AS int_extern,
-      ${kanal(`${qid('kanal')} IS NOT NULL`)} AS kanal_tot,
-      ${wb("'1','true'")} AS wb_1,
-      ${wb("'0','1','true','false'")} AS wb_tot
-    FROM ${qid(tn)} ${where}
-    GROUP BY GROUPING SETS ((${prod}), ())
-    ORDER BY ${PRODUCTS_ORDER}`;
-}
-
-// Wraps the raw aggregation into the labelled, ratio-computed columns shown in the UI,
-// so CSV / JSON / Parquet exports match the on-screen table (full view).
-function productsExportSql(table, tn, pv) {
-  const L = (k) => qlit(tt(k));
-  return `WITH p AS (${productsQuery(table, tn, pv)}) SELECT
-      CASE WHEN is_total = 1 THEN ${L('prodTotal')} ELSE COALESCE(CAST(product AS VARCHAR), 'NULL') END AS ${qid(tt('prodColProduct'))},
-      n AS ${qid(tt('prodColN'))},
-      TRY_CAST(young_ja AS DOUBLE) / NULLIF(young_tot, 0) AS ${qid(tt('prodColYoung'))},
-      young_ja AS ${qid(tt('prodColYoungAbs'))},
-      TRY_CAST(int_intern + int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineTotal'))},
-      TRY_CAST(int_intern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineIntPct'))},
-      int_intern AS ${qid(tt('prodOnlineIntAbs'))},
-      TRY_CAST(int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineExtPct'))},
-      int_extern AS ${qid(tt('prodOnlineExtAbs'))},
-      TRY_CAST(wb_1 AS DOUBLE) / NULLIF(wb_tot, 0) AS ${qid(tt('prodColWinback'))}
-    FROM p ORDER BY ${PRODUCTS_ORDER}`;
-}
-
-// Tidy one-row-per-product table (total row first) for Excel sheets — built from the cached
-// query rows so it always matches the on-screen numbers. Used for the Full and Filtered sheets.
-function productsTidyTable(prods, totalRow) {
-  const ratio = (a, b) => b > 0 ? a / b : null;
-  const cols = [
-    { name: tt('prodColProduct'),   kind:'text', get: r => r.__label },
-    { name: tt('prodMeasure'),      kind:'num',  get: r => Number(r.msr) },
-    { name: tt('prodColN'),         kind:'num',  get: r => Number(r.n) },
-    { name: tt('prodColYoung'),     kind:'num',  get: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
-    { name: tt('prodColYoungAbs'),  kind:'num',  get: r => Number(r.young_ja) },
-    { name: tt('prodOnlineTotal'),  kind:'num',  get: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
-    { name: tt('prodOnlineIntPct'), kind:'num',  get: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
-    { name: tt('prodOnlineIntAbs'), kind:'num',  get: r => Number(r.int_intern) },
-    { name: tt('prodOnlineExtPct'), kind:'num',  get: r => ratio(Number(r.int_extern), Number(r.kanal_tot)) },
-    { name: tt('prodOnlineExtAbs'), kind:'num',  get: r => Number(r.int_extern) },
-    { name: tt('prodColWinback'),   kind:'num',  get: r => ratio(Number(r.wb_1), Number(r.wb_tot)) },
-  ];
-  const mk = (r) => { const o = {}; for (const c of cols) o[c.name] = c.get(r); return o; };
-  const rows = [mk({ ...totalRow, __label: tt('prodTotal') }), ...prods.map(p => mk({ ...p, __label: p.product == null ? 'NULL' : String(p.product) }))];
-  return { rows, columns: cols.map(c => ({ name: c.name, kind: c.kind })) };
-}
-
-// Split the cached product rows into the Full list and the "< X %"-Filtered list.
-// Share basis is the PKS measure (Nettovertriebsleistung); if that is unusable (all
-// null / 0) we fall back to the record count so the filtered view still prunes.
-function productsSplit(d) {
-  const totalRow = d.rows.find(r => Number(r.is_total) === 1) || {};
-  const allProds = d.rows.filter(r => Number(r.is_total) !== 1);
-  const thr = (d.thrPct || 0) / 100;
-  let basis = 'msr', tot = Math.abs(Number(totalRow.msr) || 0);
-  if (!(tot > 0)) { basis = 'n'; tot = Math.abs(Number(totalRow.n) || 0); }
-  const filtered = (tot > 0 && thr > 0) ? allProds.filter(r => Math.abs(Number(r[basis]) || 0) / tot >= thr) : allProds;
-  return { totalRow, allProds, filtered, basis };
-}
-
-async function refreshProductsView() {
-  if (!state.activeTable) return;
-  const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
-  if (!table.schema.some(c => c.name === PRODUCTS_CLUSTER_COL)) { state.productsData = { missing: true }; renderContent(); return; }
-  try {
-    const pv = await ensureProductsPksPivot(tn);
-    const res = await runQuery(productsQuery(table, tn, pv));
-    // Read the PKS "< X %" setting 1:1. The filtered view always hides clusters below it;
-    // the threshold value comes straight from the pivot (default 1 %).
-    const thrPct = (typeof pv?.hideThresholdPct === 'number' && pv.hideThresholdPct >= 0) ? pv.hideThresholdPct : 1;
-    const chips = Object.entries(pksFilterMap(pv)).map(([col, f]) => `${col}: ${filterSummary(f)}`);
-    const v0 = pv && pv.values && pv.values[0];
-    const measureLabel = (v0 && table.schema.some(c => c.name === v0.col)) ? `${v0.agg}(${v0.col})` : tt('prodColN');
-    state.productsData = { rows: res.rows, ms: res.ms, thrPct, chips, measureLabel };
-  } catch (e) { state.productsData = { error: e.message }; toast(tt('queryError', e.message), true); }
-  renderContent();
-}
-
-// Tints used to visually group + highlight the Online block (header and body).
-const PROD_ONLINE_BG = 'rgba(46,95,163,0.07)';      // sub-columns of the Online group
-const PROD_ONLINE_BG_STRONG = 'rgba(46,95,163,0.16)'; // the "Online total" emphasis column
-
-function renderProductsMode() {
-  const wrap = el('div', { class: 'grid-wrap' }), tn = state.activeTable, table = state.tables.find(t => t.name === tn);
-  wrap.appendChild(el('div', { style:'padding:8px 12px;' },
-    el('div', { style:'font-size:14px; font-weight:600; color:var(--text);' }, tt('prodTitle')),
-    el('div', { style:'font-size:11px; color:var(--text-faint); margin-top:2px;' }, tt('prodSubtitle'))
-  ));
-
-  const data = state.productsData;
-  if (data?.missing) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, tt('prodNoCluster'))); return wrap; }
-
-  // ── Read-only chips: the filters + "< X %" setting taken 1:1 from the PKS pivot ──
-  const chipRow = el('div', { class: 'pills-bar', style:'gap:6px;' }, el('span', { style:'font-size:11px; color:var(--text-dim); font-weight:600;', title: tt('prodFromPksHint') }, tt('prodFromPks')));
-  if (data?.chips?.length) for (const lbl of data.chips) chipRow.appendChild(el('span', { class:'pill', style:'background:var(--bg-alt2); color:var(--text-dim); cursor:default;' }, lbl));
-  else chipRow.appendChild(el('span', { class:'pill', style:'background:var(--bg-alt2); color:var(--text-faint); cursor:default;' }, tt('prodNoFilters')));
-  // The absolute / relative toggle + export buttons live here too (apply to both tables below).
-  const seg = (val, label) => el('button', { class:'btn btn-sm', style: state.productsShowAs === val ? 'background:var(--accent); color:#fff; border-color:var(--accent);' : '', onclick: () => { state.productsShowAs = val; scheduleSave(); renderContent(); } }, label);
-  chipRow.appendChild(el('span', { style:'margin-left:auto; display:flex; gap:6px; align-items:center;' },
-    el('span', { style:'font-size:11px; color:var(--text-dim);' }, tt('prodShowAs')), seg('abs', tt('prodAbs')), seg('rel', tt('prodRel')),
-    el('button', { class:'btn btn-sm', style:'margin-left:8px;', onclick: () => exportXlsx('products') }, tt('prodExcel')),
-    el('button', { class:'btn btn-sm', onclick: () => openExportMenu('products') }, tt('export'))));
-  wrap.appendChild(chipRow);
-
-  if (!data || data.error || !data.rows) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, data?.error || tt('loading'))); return wrap; }
-
-  const ratio = (a, b) => b > 0 ? a / b : null;
-  const showAbs = state.productsShowAs === 'abs';
-  const fmtVal = (m, r) => { if (!showAbs && m.rel) { const v = m.rel(r); return v === null ? '—' : fmtPct(v); } return fmtNum(Number(m.abs(r))); };
-
-  const { totalRow, allProds, filtered: filteredProds } = productsSplit(data);
-
-  // Metrics are the rows; products are the columns. The Online block is highlighted and its
-  // "thereof" rows are indented. The toggle picks absolute count vs. relative share per metric.
-  const metrics = [
-    { label: tt('prodMeasure'),    title: tt('prodMeasureHint'), abs: r => Number(r.msr), rel: r => ratio(Number(r.msr), Number(totalRow.msr)) },
-    { label: tt('prodMYoung'),     title: tt('prodYoungHint'),   abs: r => Number(r.young_ja), rel: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
-    { label: tt('prodOnlineTotal'),title: tt('prodOnlineHint'),  online:'strong',             abs: r => Number(r.int_intern) + Number(r.int_extern), rel: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
-    { label: tt('prodOnlineIntAbs'),title: tt('prodIntHint'),    online:true, thereof:true,   abs: r => Number(r.int_intern), rel: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
-    { label: tt('prodOnlineExtAbs'),title: tt('prodExtHint'),    online:true, thereof:true,   abs: r => Number(r.int_extern), rel: r => ratio(Number(r.int_extern), Number(r.kanal_tot)) },
-    { label: tt('prodMWinback'),   title: tt('prodWinbackHint'), abs: r => Number(r.wb_1), rel: r => ratio(Number(r.wb_1), Number(r.wb_tot)) },
-  ];
-
-  const prodTech = (name) => { const s = String(name || '').toLowerCase(); return s.includes('kupfer') ? 'kupfer' : s.includes('fiber_neu') ? 'fiber_neu' : s.includes('fiber_alt') ? 'fiber_alt' : 'other'; };
-  const techLabel = { kupfer: tt('prodTechKupfer'), fiber_neu: tt('prodTechFiberNeu'), fiber_alt: tt('prodTechFiberAlt'), other: tt('prodTechOther') };
-  const SEP = '2px solid var(--border-strong, #94a3b8)';
-  const labelBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : 'var(--bg)');
-  const cellBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : null);
-  const headBg = 'var(--header-bg)';
-
-  // Build one transposed grid (metrics × the given product columns), grouped by technology.
-  const buildGrid = (prods) => {
-    const groups = [];
-    for (const r of prods) { const g = prodTech(r.product); const last = groups[groups.length - 1]; if (last && last.tech === g) last.items.push(r); else groups.push({ tech: g, items: [r] }); }
-    const grid = el('table', { class: 'dgrid', style:'table-layout:auto; width:auto; min-width:100%;' });
-    const corner = el('th', { rowspan: 2, style: `position:sticky; left:0; z-index:6; background:${headBg}; min-width:150px;` }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, tt('prodMetric'))));
-    const totalHd = el('th', { rowspan: 2, style: `text-align:center; background:${headBg}; border-left:${SEP};` }, el('div', { class:'th-inner', style:'justify-content:center;' }, el('span', null, tt('prodTotalCol'))));
-    const row1 = el('tr', null, corner, totalHd), row2 = el('tr', null);
-    for (const g of groups) {
-      row1.appendChild(el('th', { colspan: g.items.length, title: techLabel[g.tech], style: `text-align:center; font-weight:600; background:${headBg}; border-left:${SEP};` }, el('div', { class:'th-inner', style:'justify-content:center;' }, el('span', null, techLabel[g.tech]))));
-      g.items.forEach((it, i) => row2.appendChild(el('th', { title: String(it.product ?? 'NULL'), style: `${i === 0 ? `border-left:${SEP};` : ''} background:${headBg};` }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, it.product === null || it.product === undefined ? 'NULL' : String(it.product))))));
-    }
-    grid.appendChild(el('thead', null, row1, row2));
-    const tbody = el('tbody');
-    for (const m of metrics) {
-      const tr = el('tr');
-      tr.appendChild(el('td', { style: `position:sticky; left:0; z-index:3; background:${labelBg(m)}; ${m.thereof ? 'padding-left:22px;' : ''} ${m.online ? 'font-weight:500;' : ''}`, title: m.title || null }, m.label));
-      tr.appendChild(el('td', { class:'num', style: `border-left:${SEP}; font-weight:600; ${cellBg(m) ? `background:${cellBg(m)};` : ''}` }, fmtVal(m, totalRow)));
-      for (const g of groups) g.items.forEach((it, i) => tr.appendChild(el('td', { class:'num', style: `${i === 0 ? `border-left:${SEP};` : ''} ${cellBg(m) ? `background:${cellBg(m)};` : ''}` }, fmtVal(m, it))));
-      tbody.appendChild(tr);
-    }
-    grid.appendChild(tbody);
-    return el('div', { class: 'grid-scroll', style:'flex:0 0 auto; max-height:46vh;' }, grid);
-  };
-
-  const body = el('div', { style:'flex:1 1 0; min-height:0; overflow:auto;' });   // scrolls if both tables don't fit
-  const section = (titleText, prods) => {
-    body.appendChild(el('div', { style:'padding:8px 12px 2px; font-size:12px; font-weight:600; color:var(--text);' }, titleText));
-    body.appendChild(buildGrid(prods));
-  };
-  section(tt('prodViewFull', allProds.length), allProds);
-  section(tt('prodViewFiltered', data.thrPct, filteredProds.length), filteredProds);
-  wrap.appendChild(body);
-
-  wrap.appendChild(el('div', { class: 'statusbar' },
-    el('span', null, tt('prodMeasureNote', data.measureLabel || tt('prodColN'))),
-    el('span', { style:'margin-left:auto;' }, `${(data.ms || 0).toFixed(0)} ms`)
-  ));
-  return wrap;
-}
-
-// ============================================================
 // SQL CONSOLE MODE
 // ============================================================
 let sqlEditor = null;
@@ -2821,16 +2547,6 @@ async function exportXlsx(source) {
     } else if (source === 'sql') {
       if (!state.sqlResult) { toast(tt('runQueryFirst'), true); return; }
       buildTableSheet(wb, 'Query', state.sqlResult.rows, state.sqlResult.columns); fileBase = 'query_result';
-    } else if (source === 'products') {
-      const tn = state.activeTable;
-      let d = state.productsData;
-      if (!d || !d.rows) { await refreshProductsView(); d = state.productsData; }
-      if (!d || !d.rows) { toast(tt('prodNoData'), true); return; }
-      const { totalRow, allProds, filtered } = productsSplit(d);
-      const full = productsTidyTable(allProds, totalRow), filt = productsTidyTable(filtered, totalRow);
-      buildTableSheet(wb, tt('prodSheetFull'), full.rows, full.columns);          // sheet 1: all products
-      buildTableSheet(wb, tt('prodSheetFiltered', d.thrPct), filt.rows, filt.columns); // sheet 2: < X% hidden
-      fileBase = (tn || 'products') + '_products';
     } else {
       const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
       const filters = state.filters[tn] || {}, sort = state.sorts[tn];
@@ -2854,7 +2570,6 @@ async function doExport(source, format) {
       const filters = state.filters[tn] || {}, sort = state.sorts[tn];
       sql = `SELECT ${table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
     } else if (source === 'sql') { sql = sqlEditor ? sqlEditor.getValue() : state.sqlText; }
-    else if (source === 'products') { const pv = await ensureProductsPksPivot(tn); sql = productsExportSql(table, tn, pv); }
     else if (source === 'pivot') {
       const pv = activePivot(), filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
       const allDims = [...pv.rows.map(r => r.col), ...pv.cols.map(c => c.col)];
@@ -2966,6 +2681,7 @@ async function restoreSession(prefs) {
   setDbStatus('ready');
   if (!restored) return;
   state.mode = prefs?.global?.mode || 'table';
+  if (!['table','pivot','pks','sql'].includes(state.mode)) state.mode = 'table';   // ignore retired modes (e.g. removed 'products')
   state.activeTable = (prefs?.activeTable && state.tables.some(t => t.name === prefs.activeTable)) ? prefs.activeTable : state.tables[0].name;
   if (state.mode === 'pivot' || state.mode === 'pks') { $('#sidebar').classList.add('collapsed'); $('#sidebar-toggle').textContent = tt('schemaHide'); }
   renderAll();
@@ -2989,8 +2705,7 @@ async function restoreSession(prefs) {
     if (g.sidebarWidth) state.settings.sidebarWidth = g.sidebarWidth;
     if (g.pivotFieldsWidth) state.settings.pivotFieldsWidth = g.pivotFieldsWidth;
     if (g.pageSize) state.pageSize = g.pageSize;
-    if (g.productsShowAs) state.productsShowAs = g.productsShowAs;
-    if (g.mode) state.mode = g.mode;
+    if (g.mode && ['table','pivot','pks','sql'].includes(g.mode)) state.mode = g.mode;
     if (typeof prefs.sqlText === 'string') state.sqlText = prefs.sqlText;
     rebuildNumberFormats();
   }
