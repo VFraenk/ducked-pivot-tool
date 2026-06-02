@@ -464,7 +464,8 @@ const I18N = {
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
-    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster — Filter unten frei anwendbar',
+    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster (Produkte als Spalten) — PKS-Vorfilter aktiv (ohne td_bb_technik); Filter unten frei anwendbar',
+    prodMetric: 'Kennzahl', prodTotalCol: 'Gesamt', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Sonstige',
     prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online gesamt',
     prodOnlineIntPct: 'dav. Intern %', prodOnlineIntAbs: 'dav. Intern', prodOnlineExtPct: 'dav. Extern %', prodOnlineExtAbs: 'dav. Extern',
@@ -532,7 +533,8 @@ const I18N = {
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
     table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
-    prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster — filter the data freely below',
+    prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster (products as columns) — PKS pre-filter applied (except td_bb_technik); filter the data freely below',
+    prodMetric: 'Metric', prodTotalCol: 'Total', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Other',
     prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online total',
     prodOnlineIntPct: 'thereof Intern %', prodOnlineIntAbs: 'thereof Intern', prodOnlineExtPct: 'thereof Extern %', prodOnlineExtAbs: 'thereof Extern',
@@ -2249,6 +2251,19 @@ function fmtPct(ratio) {
 // ============================================================
 const PRODUCTS_CLUSTER_COL = 'tsc_pks_product_cluster';
 
+// The PKS pre-filter, minus the td_bb_technik (fiber) toggle: keep "normal" rows
+// (funk_/regio_/hybrid_kenner ≠ True, incl. NULL) restricted to Planungshauptgruppe ET/DP.
+// Only clauses for columns that actually exist are emitted.
+function productsPresetClauses(table) {
+  const has = (c) => table.schema.some(s => s.name === c), cl = [];
+  const truthy = "('true','t','1','ja','yes','wahr')";
+  for (const c of ['funk_kenner', 'regio_kenner', 'hybrid_kenner']) {
+    if (has(c)) cl.push(`(${qid(c)} IS NULL OR lower(CAST(${qid(c)} AS VARCHAR)) NOT IN ${truthy})`);
+  }
+  if (has('fn_planungshauptgruppe_pk')) cl.push(`${qid('fn_planungshauptgruppe_pk')} IN ('ET', 'DP')`);
+  return cl;
+}
+
 // Custom product ordering: Total first, then by technology group
 // (kupfer → fiber_neu → fiber_alt → other), and within each group by tariff
 // size (s → m → l → xl → xxl → xxxl), unknown suffixes last by name.
@@ -2273,7 +2288,10 @@ function productsQuery(table, tn) {
   const kanal = (c) => has('kanal') ? `COUNT(*) FILTER (WHERE ${c})` : '0';
   const wb = (c) => has('winback_kenner')
     ? `COUNT(*) FILTER (WHERE lower(CAST(${qid('winback_kenner')} AS VARCHAR)) IN (${c}))` : '0';
-  const where = buildWhere(table, state.filters[tn] || {});
+  const clauses = [...productsPresetClauses(table)];
+  const userBody = whereBody(state.filters[tn] || {});
+  if (userBody) clauses.push(userBody);
+  const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
   return `SELECT
       ${prod} AS product,
       GROUPING(${prod}) AS is_total,
@@ -2345,51 +2363,55 @@ function renderProductsMode() {
   if (!data || data.error || !data.rows) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, data?.error || tt('loading'))); return wrap; }
 
   const ratio = (a, b) => b > 0 ? a / b : null;
-  const pctCell = (r, bg) => el('td', { class:'num', style: bg ? `background:${bg};` : null }, r === null ? '—' : fmtPct(r));
-  const numCell = (v, bg) => el('td', { class:'num', style: bg ? `background:${bg};` : null }, fmtNum(Number(v)));
+  const fmtVal = (m, r) => { const v = m.get(r); return m.fmt === 'pct' ? (v === null ? '—' : fmtPct(v)) : fmtNum(Number(v)); };
+
+  // Metrics become the rows; products become the columns. The Online block is highlighted
+  // and its "thereof" rows are indented so the breakdown reads vertically.
+  const metrics = [
+    { label: tt('prodColN'),        fmt:'num', get: r => Number(r.n) },
+    { label: tt('prodColYoung'),    fmt:'pct', title: tt('prodYoungHint'),   get: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
+    { label: tt('prodColYoungAbs'), fmt:'num', title: tt('prodYoungHint'),   get: r => Number(r.young_ja) },
+    { label: tt('prodOnlineTotal'), fmt:'pct', title: tt('prodOnlineHint'),  online:'strong', get: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
+    { label: tt('prodOnlineIntPct'),fmt:'pct', title: tt('prodIntHint'),     online:true, thereof:true, get: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
+    { label: tt('prodOnlineIntAbs'),fmt:'num', title: tt('prodIntHint'),     online:true, thereof:true, get: r => Number(r.int_intern) },
+    { label: tt('prodOnlineExtPct'),fmt:'pct', title: tt('prodExtHint'),     online:true, thereof:true, get: r => ratio(Number(r.int_extern), Number(r.kanal_tot)) },
+    { label: tt('prodOnlineExtAbs'),fmt:'num', title: tt('prodExtHint'),     online:true, thereof:true, get: r => Number(r.int_extern) },
+    { label: tt('prodColWinback'),  fmt:'pct', title: tt('prodWinbackHint'), get: r => ratio(Number(r.wb_1), Number(r.wb_tot)) },
+  ];
+
+  const prodTech = (name) => { const s = String(name || '').toLowerCase(); return s.includes('kupfer') ? 'kupfer' : s.includes('fiber_neu') ? 'fiber_neu' : s.includes('fiber_alt') ? 'fiber_alt' : 'other'; };
+  const techLabel = { kupfer: tt('prodTechKupfer'), fiber_neu: tt('prodTechFiberNeu'), fiber_alt: tt('prodTechFiberAlt'), other: tt('prodTechOther') };
+
+  const totalRow = data.rows.find(r => Number(r.is_total) === 1) || {};
+  const prods = data.rows.filter(r => Number(r.is_total) !== 1);
+  // Rows are already ordered kupfer→fiber_neu→fiber_alt, so groups are contiguous.
+  const groups = [];
+  for (const r of prods) { const g = prodTech(r.product); const last = groups[groups.length - 1]; if (last && last.tech === g) last.items.push(r); else groups.push({ tech: g, items: [r] }); }
+
+  const SEP = '2px solid var(--border-strong, #94a3b8)';    // separator between technology blocks
+  const labelBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : 'var(--bg)');
+  const cellBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : null);
 
   const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid', style:'table-layout:auto; width:auto; min-width:100%;' });
-  // Two-row header so the Online metrics read as one highlighted group: "Online" over
-  // [Online total | thereof Intern % | thereof Intern # | thereof Extern % | thereof Extern #].
-  const th = (label, title, attrs) => el('th', { title: title || null, ...(attrs || {}) }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, label)));
-  const onlineHdrStyle = `background:${PROD_ONLINE_BG}; text-align:center;`;
-  const row1 = el('tr', null,
-    th(tt('prodColProduct'), null, { rowspan: 2 }),
-    th(tt('prodColN'), null, { rowspan: 2 }),
-    th(tt('prodColYoung'), tt('prodYoungHint'), { rowspan: 2 }),
-    th(tt('prodColYoungAbs'), tt('prodYoungHint'), { rowspan: 2 }),
-    th(tt('prodOnlineGroup'), tt('prodOnlineHint'), { colspan: 5, style: onlineHdrStyle }),
-    th(tt('prodColWinback'), tt('prodWinbackHint'), { rowspan: 2 })
-  );
-  const row2 = el('tr', null,
-    th(tt('prodOnlineTotal'), tt('prodOnlineHint'), { style: `background:${PROD_ONLINE_BG_STRONG};` }),
-    th(tt('prodOnlineIntPct'), tt('prodIntHint'), { style: `background:${PROD_ONLINE_BG};` }),
-    th(tt('prodOnlineIntAbs'), tt('prodIntHint'), { style: `background:${PROD_ONLINE_BG};` }),
-    th(tt('prodOnlineExtPct'), tt('prodExtHint'), { style: `background:${PROD_ONLINE_BG};` }),
-    th(tt('prodOnlineExtAbs'), tt('prodExtHint'), { style: `background:${PROD_ONLINE_BG};` })
-  );
+  const headBg = 'var(--header-bg)';
+  // Row 1: technology group headers spanning their product columns. Row 2: product names.
+  const corner = el('th', { rowspan: 2, style: `position:sticky; left:0; z-index:6; background:${headBg}; min-width:150px;` }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, tt('prodMetric'))));
+  const totalHd = el('th', { rowspan: 2, style: `text-align:center; background:${headBg}; border-left:${SEP};` }, el('div', { class:'th-inner', style:'justify-content:center;' }, el('span', null, tt('prodTotalCol'))));
+  const row1 = el('tr', null, corner, totalHd);
+  const row2 = el('tr', null);
+  for (const g of groups) {
+    row1.appendChild(el('th', { colspan: g.items.length, title: techLabel[g.tech], style: `text-align:center; font-weight:600; background:${headBg}; border-left:${SEP};` }, el('div', { class:'th-inner', style:'justify-content:center;' }, el('span', null, techLabel[g.tech]))));
+    g.items.forEach((it, i) => row2.appendChild(el('th', { title: String(it.product ?? 'NULL'), style: `${i === 0 ? `border-left:${SEP};` : ''} background:${headBg};` }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, it.product === null || it.product === undefined ? 'NULL' : String(it.product))))));
+  }
   grid.appendChild(el('thead', null, row1, row2));
 
   const tbody = el('tbody');
-  if (data.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: 10, style:'text-align:center; padding:20px; color:var(--text-faint);' }, tt('prodNoData'))));
-  for (const r of data.rows) {
-    const isTotal = Number(r.is_total) === 1;
-    const label = isTotal ? tt('prodTotal') : (r.product === null || r.product === undefined ? 'NULL' : String(r.product));
-    const kt = Number(r.kanal_tot);
-    const tr = el('tr', { style: isTotal ? 'font-weight:600; background:var(--row-total, rgba(46,95,163,0.08));' : null },
-      el('td', { class: (r.product === null && !isTotal) ? 'null' : '' }, label),
-      numCell(r.n),
-      pctCell(ratio(Number(r.young_ja), Number(r.young_tot))),
-      numCell(r.young_ja),
-      pctCell(ratio(Number(r.int_intern) + Number(r.int_extern), kt), isTotal ? null : PROD_ONLINE_BG_STRONG),
-      pctCell(ratio(Number(r.int_intern), kt), isTotal ? null : PROD_ONLINE_BG),
-      numCell(r.int_intern, isTotal ? null : PROD_ONLINE_BG),
-      pctCell(ratio(Number(r.int_extern), kt), isTotal ? null : PROD_ONLINE_BG),
-      numCell(r.int_extern, isTotal ? null : PROD_ONLINE_BG)
-    );
-    // Online total emphasis even on the total row.
-    if (isTotal) tr.children[4].style.fontWeight = '700';
-    tr.appendChild(pctCell(ratio(Number(r.wb_1), Number(r.wb_tot))));
+  for (const m of metrics) {
+    const tr = el('tr');
+    // Sticky metric-label column; "thereof" rows indented.
+    tr.appendChild(el('td', { style: `position:sticky; left:0; z-index:3; background:${labelBg(m)}; ${m.thereof ? 'padding-left:22px;' : ''} ${m.online ? 'font-weight:500;' : ''}`, title: m.title || null }, m.label));
+    tr.appendChild(el('td', { class:'num', style: `border-left:${SEP}; font-weight:600; ${cellBg(m) ? `background:${cellBg(m)};` : ''}` }, fmtVal(m, totalRow)));
+    for (const g of groups) g.items.forEach((it, i) => tr.appendChild(el('td', { class:'num', style: `${i === 0 ? `border-left:${SEP};` : ''} ${cellBg(m) ? `background:${cellBg(m)};` : ''}` }, fmtVal(m, it))));
     tbody.appendChild(tr);
   }
   grid.appendChild(tbody); gridScroll.appendChild(grid); wrap.appendChild(gridScroll);
