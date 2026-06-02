@@ -464,13 +464,14 @@ const I18N = {
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
-    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster (über die gesamte Tabelle, ohne PKS-Filter)',
+    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster — Filter unten frei anwendbar',
     prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
-    prodColIntInternAbs: 'INT intern PK', prodColIntInternPct: 'INT intern PK %',
-    prodColIntExternAbs: 'INT extern PK', prodColIntExternPct: 'INT extern PK %',
-    prodColOnline: 'Online-Anteil', prodColWinback: 'Winback-Anteil',
+    prodOnlineGroup: 'Online', prodOnlineTotal: 'Online gesamt',
+    prodOnlineIntPct: 'dav. Intern %', prodOnlineIntAbs: 'dav. Intern', prodOnlineExtPct: 'dav. Extern %', prodOnlineExtAbs: 'dav. Extern',
+    prodColWinback: 'Winback-Anteil', prodAddFilter: '+ Filter hinzufügen',
     prodTotal: 'Gesamt (alle Produkte)', prodNoCluster: 'Spalte „tsc_pks_product_cluster" in dieser Tabelle nicht gefunden.', prodNoData: 'Keine Daten.',
     prodYoungHint: 'JA / (JA + NEIN) aus fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / alle Kanäle (kanal)', prodWinbackHint: '1 / (0 + 1) aus winback_kenner',
+    prodIntHint: 'INT intern PK / alle Kanäle (kanal)', prodExtHint: 'INT extern PK / alle Kanäle (kanal)',
     resetPreset: 'Zurücksetzen', fiberLabel: 'Technik:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: „Ohne Fiber" = ≠ Fiber, „Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
     sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
@@ -531,13 +532,14 @@ const I18N = {
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
     table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
-    prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster (across the whole table, no PKS filter)',
+    prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster — filter the data freely below',
     prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
-    prodColIntInternAbs: 'INT intern PK', prodColIntInternPct: 'INT intern PK %',
-    prodColIntExternAbs: 'INT extern PK', prodColIntExternPct: 'INT extern PK %',
-    prodColOnline: 'Online share', prodColWinback: 'Winback share',
+    prodOnlineGroup: 'Online', prodOnlineTotal: 'Online total',
+    prodOnlineIntPct: 'thereof Intern %', prodOnlineIntAbs: 'thereof Intern', prodOnlineExtPct: 'thereof Extern %', prodOnlineExtAbs: 'thereof Extern',
+    prodColWinback: 'Winback share', prodAddFilter: '+ Add filter',
     prodTotal: 'Total (all products)', prodNoCluster: 'Column "tsc_pks_product_cluster" not found in this table.', prodNoData: 'No data.',
     prodYoungHint: 'YES / (YES + NO) from fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / all channels (kanal)', prodWinbackHint: '1 / (0 + 1) from winback_kenner',
+    prodIntHint: 'INT intern PK / all channels (kanal)', prodExtHint: 'INT extern PK / all channels (kanal)',
     resetPreset: 'Reset', fiberLabel: 'Tech:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: "Ohne Fiber" = ≠ Fiber, "Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
     sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
@@ -1387,9 +1389,9 @@ function renderFilterDialog(anchor) {
   // drag order); for a plain table column they drive the table sort/filter as before.
   const pvAxisOf = (pv, c) => pv.rows.some(r => r.col === c) ? 'rowSort' : (pv.cols.some(r => r.col === c) ? 'colSort' : null);
   const pivotSort = (dir) => { const pv = activePivot(), ax = pvAxisOf(pv, fdlg.col.name); if (ax) pv[ax] = { by: 'label', dir }; if (pv.memberOrder) delete pv.memberOrder[fdlg.col.name]; closeDialog(); refreshPivotView(); };
-  const sortAscFn = fdlg.isPivotFilter ? () => pivotSort('asc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshTableView(); };
-  const sortDescFn = fdlg.isPivotFilter ? () => pivotSort('desc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshTableView(); };
-  const clearFn = fdlg.isPivotFilter ? () => { fdlg.isPivotFilter.filter = null; closeDialog(); refreshPivotView(); } : () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshTableView(); };
+  const sortAscFn = fdlg.isPivotFilter ? () => pivotSort('asc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'asc' }; closeDialog(); refreshActiveView(); };
+  const sortDescFn = fdlg.isPivotFilter ? () => pivotSort('desc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshActiveView(); };
+  const clearFn = fdlg.isPivotFilter ? () => { fdlg.isPivotFilter.filter = null; closeDialog(); refreshPivotView(); } : () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshActiveView(); };
   dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: sortAscFn }, tt('sortAsc')), el('button', { onclick: sortDescFn }, tt('sortDesc')), el('button', { onclick: clearFn }, tt('clearFilter'))));
 
   const kind = fdlg.col.kind, tabsArr = [['values', tt('tabValues')]];
@@ -1609,7 +1611,7 @@ function applyFilterDialog() {
     fdlg.isPivotFilter.filter = finalFilter; closeDialog(); refreshPivotView(); return;
   }
   if (finalFilter) state.filters[tn][col] = finalFilter; else delete state.filters[tn][col];
-  state.page = 0; closeDialog(); refreshTableView();
+  state.page = 0; closeDialog(); refreshActiveView();
 }
 function closeDialog() { if (_fdlgCloseHandler) document.removeEventListener('mousedown', _fdlgCloseHandler); _fdlgCloseHandler = null; $('#dialog-root').innerHTML = ''; state.fdlg = null; }
 
@@ -2271,6 +2273,7 @@ function productsQuery(table, tn) {
   const kanal = (c) => has('kanal') ? `COUNT(*) FILTER (WHERE ${c})` : '0';
   const wb = (c) => has('winback_kenner')
     ? `COUNT(*) FILTER (WHERE lower(CAST(${qid('winback_kenner')} AS VARCHAR)) IN (${c}))` : '0';
+  const where = buildWhere(table, state.filters[tn] || {});
   return `SELECT
       ${prod} AS product,
       GROUPING(${prod}) AS is_total,
@@ -2282,7 +2285,7 @@ function productsQuery(table, tn) {
       ${kanal(`${qid('kanal')} IS NOT NULL`)} AS kanal_tot,
       ${wb("'1','true'")} AS wb_1,
       ${wb("'0','1','true','false'")} AS wb_tot
-    FROM ${qid(tn)}
+    FROM ${qid(tn)} ${where}
     GROUP BY GROUPING SETS ((${prod}), ())
     ORDER BY ${PRODUCTS_ORDER}`;
 }
@@ -2296,11 +2299,11 @@ function productsExportSql(table, tn) {
       n AS ${qid(tt('prodColN'))},
       TRY_CAST(young_ja AS DOUBLE) / NULLIF(young_tot, 0) AS ${qid(tt('prodColYoung'))},
       young_ja AS ${qid(tt('prodColYoungAbs'))},
-      int_intern AS ${qid(tt('prodColIntInternAbs'))},
-      TRY_CAST(int_intern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColIntInternPct'))},
-      int_extern AS ${qid(tt('prodColIntExternAbs'))},
-      TRY_CAST(int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColIntExternPct'))},
-      TRY_CAST(int_intern + int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColOnline'))},
+      TRY_CAST(int_intern + int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineTotal'))},
+      TRY_CAST(int_intern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineIntPct'))},
+      int_intern AS ${qid(tt('prodOnlineIntAbs'))},
+      TRY_CAST(int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodOnlineExtPct'))},
+      int_extern AS ${qid(tt('prodOnlineExtAbs'))},
       TRY_CAST(wb_1 AS DOUBLE) / NULLIF(wb_tot, 0) AS ${qid(tt('prodColWinback'))}
     FROM p ORDER BY ${PRODUCTS_ORDER}`;
 }
@@ -2316,52 +2319,77 @@ async function refreshProductsView() {
   renderContent();
 }
 
+// Tints used to visually group + highlight the Online block (header and body).
+const PROD_ONLINE_BG = 'rgba(46,95,163,0.07)';      // sub-columns of the Online group
+const PROD_ONLINE_BG_STRONG = 'rgba(46,95,163,0.16)'; // the "Online total" emphasis column
+
 function renderProductsMode() {
-  const wrap = el('div', { class: 'grid-wrap' });
+  const wrap = el('div', { class: 'grid-wrap' }), tn = state.activeTable, table = state.tables.find(t => t.name === tn);
   wrap.appendChild(el('div', { style:'padding:8px 12px;' },
     el('div', { style:'font-size:14px; font-weight:600; color:var(--text);' }, tt('prodTitle')),
     el('div', { style:'font-size:11px; color:var(--text-faint); margin-top:2px;' }, tt('prodSubtitle'))
   ));
+
+  // ── Filter bar: active-filter pills + a column picker that opens the shared filter dialog ──
+  const filters = state.filters[tn] || {};
+  const pills = el('div', { class: 'pills-bar' });
+  const colSel = el('select', { class:'btn btn-sm', style:'max-width:220px;', onchange: (e) => { const c = table.schema.find(x => x.name === e.target.value); e.target.value = ''; if (c) openFilterDialog(c, e.target); } },
+    el('option', { value:'' }, tt('prodAddFilter')),
+    ...table.schema.map(c => el('option', { value: c.name }, c.name)));
+  pills.appendChild(colSel);
+  for (const [col, f] of Object.entries(filters)) if (f) pills.appendChild(el('span', { class:'pill' }, `${col}: ${filterSummary(f)}`, el('span', { class:'x', onclick: () => { delete filters[col]; refreshProductsView(); } }, '×')));
+  wrap.appendChild(pills);
+
   const data = state.productsData;
   if (data?.missing) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, tt('prodNoCluster'))); return wrap; }
   if (!data || data.error || !data.rows) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, data?.error || tt('loading'))); return wrap; }
 
   const ratio = (a, b) => b > 0 ? a / b : null;
-  const pctCell = (r) => el('td', { class:'num' }, r === null ? '—' : fmtPct(r));
-  const numCell = (v) => el('td', { class:'num' }, fmtNum(Number(v)));
+  const pctCell = (r, bg) => el('td', { class:'num', style: bg ? `background:${bg};` : null }, r === null ? '—' : fmtPct(r));
+  const numCell = (v, bg) => el('td', { class:'num', style: bg ? `background:${bg};` : null }, fmtNum(Number(v)));
 
-  const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid' });
-  const headCell = (label, title) => el('th', { title: title || null }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, label)));
-  grid.appendChild(el('thead', null, el('tr',
-    null,
-    headCell(tt('prodColProduct')),
-    headCell(tt('prodColN')),
-    headCell(tt('prodColYoung'), tt('prodYoungHint')),
-    headCell(tt('prodColYoungAbs'), tt('prodYoungHint')),
-    headCell(tt('prodColIntInternAbs'), tt('prodOnlineHint')),
-    headCell(tt('prodColIntInternPct'), tt('prodOnlineHint')),
-    headCell(tt('prodColIntExternAbs'), tt('prodOnlineHint')),
-    headCell(tt('prodColIntExternPct'), tt('prodOnlineHint')),
-    headCell(tt('prodColOnline'), tt('prodOnlineHint')),
-    headCell(tt('prodColWinback'), tt('prodWinbackHint'))
-  )));
+  const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid', style:'table-layout:auto; width:auto; min-width:100%;' });
+  // Two-row header so the Online metrics read as one highlighted group: "Online" over
+  // [Online total | thereof Intern % | thereof Intern # | thereof Extern % | thereof Extern #].
+  const th = (label, title, attrs) => el('th', { title: title || null, ...(attrs || {}) }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, label)));
+  const onlineHdrStyle = `background:${PROD_ONLINE_BG}; text-align:center;`;
+  const row1 = el('tr', null,
+    th(tt('prodColProduct'), null, { rowspan: 2 }),
+    th(tt('prodColN'), null, { rowspan: 2 }),
+    th(tt('prodColYoung'), tt('prodYoungHint'), { rowspan: 2 }),
+    th(tt('prodColYoungAbs'), tt('prodYoungHint'), { rowspan: 2 }),
+    th(tt('prodOnlineGroup'), tt('prodOnlineHint'), { colspan: 5, style: onlineHdrStyle }),
+    th(tt('prodColWinback'), tt('prodWinbackHint'), { rowspan: 2 })
+  );
+  const row2 = el('tr', null,
+    th(tt('prodOnlineTotal'), tt('prodOnlineHint'), { style: `background:${PROD_ONLINE_BG_STRONG};` }),
+    th(tt('prodOnlineIntPct'), tt('prodIntHint'), { style: `background:${PROD_ONLINE_BG};` }),
+    th(tt('prodOnlineIntAbs'), tt('prodIntHint'), { style: `background:${PROD_ONLINE_BG};` }),
+    th(tt('prodOnlineExtPct'), tt('prodExtHint'), { style: `background:${PROD_ONLINE_BG};` }),
+    th(tt('prodOnlineExtAbs'), tt('prodExtHint'), { style: `background:${PROD_ONLINE_BG};` })
+  );
+  grid.appendChild(el('thead', null, row1, row2));
+
   const tbody = el('tbody');
   if (data.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: 10, style:'text-align:center; padding:20px; color:var(--text-faint);' }, tt('prodNoData'))));
   for (const r of data.rows) {
     const isTotal = Number(r.is_total) === 1;
     const label = isTotal ? tt('prodTotal') : (r.product === null || r.product === undefined ? 'NULL' : String(r.product));
+    const kt = Number(r.kanal_tot);
     const tr = el('tr', { style: isTotal ? 'font-weight:600; background:var(--row-total, rgba(46,95,163,0.08));' : null },
       el('td', { class: (r.product === null && !isTotal) ? 'null' : '' }, label),
       numCell(r.n),
       pctCell(ratio(Number(r.young_ja), Number(r.young_tot))),
       numCell(r.young_ja),
-      numCell(r.int_intern),
-      pctCell(ratio(Number(r.int_intern), Number(r.kanal_tot))),
-      numCell(r.int_extern),
-      pctCell(ratio(Number(r.int_extern), Number(r.kanal_tot))),
-      pctCell(ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot))),
-      pctCell(ratio(Number(r.wb_1), Number(r.wb_tot)))
+      pctCell(ratio(Number(r.int_intern) + Number(r.int_extern), kt), isTotal ? null : PROD_ONLINE_BG_STRONG),
+      pctCell(ratio(Number(r.int_intern), kt), isTotal ? null : PROD_ONLINE_BG),
+      numCell(r.int_intern, isTotal ? null : PROD_ONLINE_BG),
+      pctCell(ratio(Number(r.int_extern), kt), isTotal ? null : PROD_ONLINE_BG),
+      numCell(r.int_extern, isTotal ? null : PROD_ONLINE_BG)
     );
+    // Online total emphasis even on the total row.
+    if (isTotal) tr.children[4].style.fontWeight = '700';
+    tr.appendChild(pctCell(ratio(Number(r.wb_1), Number(r.wb_tot))));
     tbody.appendChild(tr);
   }
   grid.appendChild(tbody); gridScroll.appendChild(grid); wrap.appendChild(gridScroll);
