@@ -2247,6 +2247,21 @@ function fmtPct(ratio) {
 // ============================================================
 const PRODUCTS_CLUSTER_COL = 'tsc_pks_product_cluster';
 
+// Custom product ordering: Total first, then by technology group
+// (kupfer → fiber_neu → fiber_alt → other), and within each group by tariff
+// size (s → m → l → xl → xxl → xxxl), unknown suffixes last by name.
+const PRODUCTS_ORDER = `is_total DESC,
+    CASE
+      WHEN CAST(product AS VARCHAR) ILIKE '%kupfer%' THEN 0
+      WHEN CAST(product AS VARCHAR) ILIKE '%fiber_neu%' THEN 1
+      WHEN CAST(product AS VARCHAR) ILIKE '%fiber_alt%' THEN 2
+      ELSE 3
+    END,
+    CASE lower(regexp_extract(CAST(product AS VARCHAR), '[^_]+$'))
+      WHEN 's' THEN 0 WHEN 'm' THEN 1 WHEN 'l' THEN 2 WHEN 'xl' THEN 3 WHEN 'xxl' THEN 4 WHEN 'xxxl' THEN 5 ELSE 9
+    END,
+    product`;
+
 function productsQuery(table, tn) {
   const cols = new Set(table.schema.map(c => c.name)), has = (c) => cols.has(c);
   const prod = qid(PRODUCTS_CLUSTER_COL);
@@ -2269,7 +2284,7 @@ function productsQuery(table, tn) {
       ${wb("'0','1','true','false'")} AS wb_tot
     FROM ${qid(tn)}
     GROUP BY GROUPING SETS ((${prod}), ())
-    ORDER BY is_total DESC, n DESC`;
+    ORDER BY ${PRODUCTS_ORDER}`;
 }
 
 // Wraps the raw aggregation into the labelled, ratio-computed columns shown in the UI,
@@ -2287,7 +2302,7 @@ function productsExportSql(table, tn) {
       TRY_CAST(int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColIntExternPct'))},
       TRY_CAST(int_intern + int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColOnline'))},
       TRY_CAST(wb_1 AS DOUBLE) / NULLIF(wb_tot, 0) AS ${qid(tt('prodColWinback'))}
-    FROM p ORDER BY is_total DESC, n DESC`;
+    FROM p ORDER BY ${PRODUCTS_ORDER}`;
 }
 
 async function refreshProductsView() {
