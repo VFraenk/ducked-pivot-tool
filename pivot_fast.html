@@ -699,7 +699,7 @@ function serializePivot(pv) {
   const field = (f) => ({ col: f.col, agg: f.agg, filter: serializeFilter(f.filter) });
   return {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
-    expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals, noColSub: [...(pv.noColSub || [])],
+    expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals, colSubShow: [...(pv.colSubShow || [])],
     showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, hideThresholdPct: pv.hideThresholdPct, rowSort: pv.rowSort, colSort: pv.colSort,
     memberOrder: pv.memberOrder || {},
   };
@@ -709,7 +709,7 @@ function deserializePivot(s) {
   const field = (f) => ({ col: f.col, agg: f.agg, filter: deserializeFilter(f.filter) });
   const pv = {
     filters: (s.filters || []).map(field), cols: (s.cols || []).map(field), rows: (s.rows || []).map(field), values: (s.values || []).map(field),
-    expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top', noColSub: new Set(s.noColSub || []),
+    expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top', colSubShow: new Set(s.colSubShow || []),
     showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct, hideThresholdPct: (typeof s.hideThresholdPct === 'number' && s.hideThresholdPct >= 0) ? s.hideThresholdPct : 1,
     rowSort: s.rowSort || { by: 'label', dir: 'asc' }, colSort: s.colSort || { by: 'label', dir: 'asc' },
     memberOrder: s.memberOrder || {},
@@ -1000,7 +1000,7 @@ function prunePivotToSchema(pv, schema) {
   pv.rows = pv.rows.filter(r => cols.has(r.col)); pv.cols = pv.cols.filter(r => cols.has(r.col));
   pv.values = pv.values.filter(r => cols.has(r.col)); pv.filters = pv.filters.filter(r => cols.has(r.col));
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', noColSub: new Set(), showAs: 'abs', hideBelowPct: false, hideThresholdPct: 1, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', colSubShow: new Set(), showAs: 'abs', hideBelowPct: false, hideThresholdPct: 1, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
 
 // ── PKS tab: a predefined-but-editable pivot living in its own per-table store ──
 // Which store the live pivot UI reads/writes depends on the active mode (see activePivot).
@@ -1407,11 +1407,11 @@ function renderFilterDialog(anchor) {
   if (fdlg.isPivotFilter) {
     const pvSub = activePivot(), cIdx = pvSub ? pvSub.cols.findIndex(c => c.col === fdlg.col.name) : -1;
     if (pvSub && cIdx >= 0 && cIdx < pvSub.cols.length - 1) {
-      const shown = !(pvSub.noColSub && pvSub.noColSub.has(fdlg.col.name));
+      const shown = !!(pvSub.colSubShow && pvSub.colSubShow.has(fdlg.col.name));
       dlg.appendChild(el('label', { style:'display:flex; align-items:center; gap:6px; padding:6px 8px; border-bottom:1px solid var(--border); font-size:12px; cursor:pointer;', title: tt('showColSubHint') },
         el('input', { type:'checkbox', checked: shown ? '' : null, onchange: (e) => {
-          pvSub.noColSub = pvSub.noColSub || new Set();
-          if (e.target.checked) pvSub.noColSub.delete(fdlg.col.name); else pvSub.noColSub.add(fdlg.col.name);
+          pvSub.colSubShow = pvSub.colSubShow || new Set();
+          if (e.target.checked) pvSub.colSubShow.add(fdlg.col.name); else pvSub.colSubShow.delete(fdlg.col.name);
           rebuildPivotShape(); renderContent(); scheduleSave();
         } }),
         el('span', null, tt('showColSub'))
@@ -2003,9 +2003,9 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
     const isExpanded = isRoot || pv.colExpanded.has(node.key);
     if (isExpanded && node.children.length > 0) {
       node.children.forEach(walkCol);
-      // Column subtotal for this node's field, unless globally off or this field is de-selected.
+      // Column subtotals are opt-in per field (default OFF); enable via the field-dialog checkbox.
       const nodeField = colDims[node.depth];
-      if (pv.subtotals !== 'off' && !isRoot && !(pv.noColSub && pv.noColSub.has(nodeField))) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
+      if (!isRoot && pv.colSubShow && pv.colSubShow.has(nodeField)) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
     } else if (!isRoot) leafCols.push({ ...node, isColSubtotal: false, isCollapsed: true });
   }
   if (colDims.length === 0) leafCols.push({ key:'__all', label:tt('total'), vals:[], depth: -1, isColSubtotal: false }); else colTreeRoot.children.forEach(walkCol);
