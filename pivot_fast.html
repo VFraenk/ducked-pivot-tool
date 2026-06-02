@@ -511,6 +511,7 @@ const I18N = {
     pivotFields: 'PivotTable-Felder', searchFields: 'Felder suchen…',
     tileFilters: 'Filter', tileColumns: 'Spalten', tileRows: 'Zeilen', tileValues: 'Σ Werte',
     subtotals: 'Zwischensummen:', stTop: 'oben', stBottom: 'unten', stOff: 'aus',
+    showColSub: 'Spaltensumme anzeigen', showColSubHint: 'Zwischensumme dieses Spaltenfelds ein-/ausblenden (z. B. die Summe je neues_fiber_portfolio)',
     expandAll: 'Alle aufklappen', collapseAll: 'Alle zuklappen', clear: 'Leeren',
     presetFilter: 'PKS Filter', presetFilterTitle: 'PKS Filter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS Filter gesetzt ({0} Felder)', presetCleared: 'PKS Filter entfernt', presetNoCols: 'Keine passenden Spalten für den PKS Filter gefunden',
@@ -571,6 +572,7 @@ const I18N = {
     pivotFields: 'PivotTable Fields', searchFields: 'Search fields…',
     tileFilters: 'Filters', tileColumns: 'Columns', tileRows: 'Rows', tileValues: 'Σ Values',
     subtotals: 'Subtotals:', stTop: 'top', stBottom: 'bottom', stOff: 'off',
+    showColSub: 'Show column subtotal', showColSubHint: 'Show/hide the subtotal column for this column field (e.g. the total per neues_fiber_portfolio)',
     expandAll: 'Expand All', collapseAll: 'Collapse All', clear: 'Clear',
     presetFilter: 'PKS Filter', presetFilterTitle: 'Apply PKS filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS filter applied ({0} fields)', presetCleared: 'PKS filter cleared', presetNoCols: 'No matching columns for the PKS filter',
@@ -697,7 +699,7 @@ function serializePivot(pv) {
   const field = (f) => ({ col: f.col, agg: f.agg, filter: serializeFilter(f.filter) });
   return {
     filters: pv.filters.map(field), cols: pv.cols.map(field), rows: pv.rows.map(field), values: pv.values.map(field),
-    expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals,
+    expanded: [...pv.expanded], colExpanded: [...pv.colExpanded], subtotals: pv.subtotals, noColSub: [...(pv.noColSub || [])],
     showAs: pv.showAs, hideBelowPct: pv.hideBelowPct, hideThresholdPct: pv.hideThresholdPct, rowSort: pv.rowSort, colSort: pv.colSort,
     memberOrder: pv.memberOrder || {},
   };
@@ -707,7 +709,7 @@ function deserializePivot(s) {
   const field = (f) => ({ col: f.col, agg: f.agg, filter: deserializeFilter(f.filter) });
   const pv = {
     filters: (s.filters || []).map(field), cols: (s.cols || []).map(field), rows: (s.rows || []).map(field), values: (s.values || []).map(field),
-    expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top',
+    expanded: new Set(s.expanded || []), colExpanded: new Set(s.colExpanded || []), subtotals: s.subtotals || 'top', noColSub: new Set(s.noColSub || []),
     showAs: s.showAs || 'abs', hideBelowPct: !!s.hideBelowPct, hideThresholdPct: (typeof s.hideThresholdPct === 'number' && s.hideThresholdPct >= 0) ? s.hideThresholdPct : 1,
     rowSort: s.rowSort || { by: 'label', dir: 'asc' }, colSort: s.colSort || { by: 'label', dir: 'asc' },
     memberOrder: s.memberOrder || {},
@@ -998,7 +1000,7 @@ function prunePivotToSchema(pv, schema) {
   pv.rows = pv.rows.filter(r => cols.has(r.col)); pv.cols = pv.cols.filter(r => cols.has(r.col));
   pv.values = pv.values.filter(r => cols.has(r.col)); pv.filters = pv.filters.filter(r => cols.has(r.col));
 }
-function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', showAs: 'abs', hideBelowPct: false, hideThresholdPct: 1, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
+function newPivotState() { return { filters: [], cols: [], rows: [], values: [], expanded: new Set(), colExpanded: new Set(), subtotals: 'top', noColSub: new Set(), showAs: 'abs', hideBelowPct: false, hideThresholdPct: 1, rowSort: { by: 'label', dir: 'asc' }, colSort: { by: 'label', dir: 'asc' }, memberOrder: {} }; }
 
 // ── PKS tab: a predefined-but-editable pivot living in its own per-table store ──
 // Which store the live pivot UI reads/writes depends on the active mode (see activePivot).
@@ -1399,6 +1401,23 @@ function renderFilterDialog(anchor) {
   const sortDescFn = fdlg.isPivotFilter ? () => pivotSort('desc') : () => { state.sorts[state.activeTable] = { col: fdlg.col.name, dir: 'desc' }; closeDialog(); refreshActiveView(); };
   const clearFn = fdlg.isPivotFilter ? () => { fdlg.isPivotFilter.filter = null; closeDialog(); refreshPivotView(); } : () => { delete state.filters[state.activeTable][fdlg.col.name]; closeDialog(); refreshActiveView(); };
   dlg.appendChild(el('div', { class: 'top-actions' }, el('button', { onclick: sortAscFn }, tt('sortAsc')), el('button', { onclick: sortDescFn }, tt('sortDesc')), el('button', { onclick: clearFn }, tt('clearFilter'))));
+
+  // Per-field "show column subtotal" toggle (Excel-style). Only for an OUTER column field —
+  // i.e. a column dimension that isn't the innermost — since only those produce subtotal columns.
+  if (fdlg.isPivotFilter) {
+    const pvSub = activePivot(), cIdx = pvSub ? pvSub.cols.findIndex(c => c.col === fdlg.col.name) : -1;
+    if (pvSub && cIdx >= 0 && cIdx < pvSub.cols.length - 1) {
+      const shown = !(pvSub.noColSub && pvSub.noColSub.has(fdlg.col.name));
+      dlg.appendChild(el('label', { style:'display:flex; align-items:center; gap:6px; padding:6px 8px; border-bottom:1px solid var(--border); font-size:12px; cursor:pointer;', title: tt('showColSubHint') },
+        el('input', { type:'checkbox', checked: shown ? '' : null, onchange: (e) => {
+          pvSub.noColSub = pvSub.noColSub || new Set();
+          if (e.target.checked) pvSub.noColSub.delete(fdlg.col.name); else pvSub.noColSub.add(fdlg.col.name);
+          rebuildPivotShape(); renderContent(); scheduleSave();
+        } }),
+        el('span', null, tt('showColSub'))
+      ));
+    }
+  }
 
   const kind = fdlg.col.kind, tabsArr = [['values', tt('tabValues')]];
   if (kind === 'num') tabsArr.push(['num', tt('tabNumber')]); else if (kind === 'date') tabsArr.push(['date', tt('tabDate')]); else tabsArr.push(['text', tt('tabText')]);
@@ -1984,7 +2003,9 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
     const isExpanded = isRoot || pv.colExpanded.has(node.key);
     if (isExpanded && node.children.length > 0) {
       node.children.forEach(walkCol);
-      if (pv.subtotals !== 'off' && !isRoot) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
+      // Column subtotal for this node's field, unless globally off or this field is de-selected.
+      const nodeField = colDims[node.depth];
+      if (pv.subtotals !== 'off' && !isRoot && !(pv.noColSub && pv.noColSub.has(nodeField))) leafCols.push({ ...node, isColSubtotal: true, isCollapsed: false });
     } else if (!isRoot) leafCols.push({ ...node, isColSubtotal: false, isCollapsed: true });
   }
   if (colDims.length === 0) leafCols.push({ key:'__all', label:tt('total'), vals:[], depth: -1, isColSubtotal: false }); else colTreeRoot.children.forEach(walkCol);
