@@ -909,13 +909,20 @@ async function loadFiles(fileList) {
 // Registers a parquet buffer as a DuckDB view and wires up its view state.
 // Used both for fresh file loads and for restoring persisted files on boot.
 async function registerParquet(buf, fileName, opts = {}) {
+  registerParquet._seq = (registerParquet._seq || 0);
   const { tableName: forcedName, prefs = null, persist = true } = opts;
   // Re-loading a file that maps to an existing table updates it in place, keeping all
   // view config (pivot, PKS, filters, …); only an explicit forcedName or a new name makes a new table.
   const existing = forcedName ? null : state.tables.find(t => t.name === baseTableName(fileName));
   const tableName = forcedName || (existing ? existing.name : sanitizeTableName(fileName, state.tables.map(t => t.name)));
-  const regName = tableName + '.parquet';            // unique virtual name keyed off the (unique) table name
-  try { await state.db.dropFile(regName); } catch (_) {}
+  // Unique virtual file name per load. A deterministic name (e.g. tableName+'.parquet') collides
+  // when re-loading the same file in one session: the previous buffer is still in use by the table's
+  // view, dropFile can't release an in-use buffer, and registerFileBuffer then throws "already
+  // registered" — which broke switching data until a page reload rebuilt the worker.
+  const regName = tableName + '.' + (++registerParquet._seq) + '.parquet';
+  // Drop the dependent view FIRST so the old file buffer is no longer in use, then release it.
+  try { await state.conn.query(`DROP VIEW IF EXISTS ${qid(tableName)}`); } catch (_) {}
+  try { if (existing?.file) await state.db.dropFile(existing.file); } catch (_) {}
   await state.db.registerFileBuffer(regName, buf);
   await state.conn.query(`CREATE OR REPLACE VIEW ${qid(tableName)} AS SELECT * FROM read_parquet(${qlit(regName)})`);
   const schemaRes = await runQuery(`DESCRIBE ${qid(tableName)}`);
@@ -1011,7 +1018,7 @@ function pksFiberFilter(only) { return only ? { type: 'text', op: 'eq', a: 'Fibe
 function pksPresetConfig(table) {
   const cols = new Set((table?.schema || []).map(c => c.name)), has = (c) => cols.has(c);
   const pv = newPivotState();
-  pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'phase_1_bb_agb_brutto' }].filter(r => has(r.col));
+  pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'adj_phase_1_bb_agb_brutto' }, { col: 'tsc_pks_highlight' }].filter(r => has(r.col));
   pv.cols = [{ col: 'anschluss_bandbreite_cluster' }].filter(r => has(r.col));
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
   // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible
