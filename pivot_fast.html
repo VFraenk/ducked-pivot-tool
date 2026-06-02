@@ -494,6 +494,7 @@ const I18N = {
     prodFromPks: 'Aus PKS-Pivot:', prodFromPksHint: 'Filter und „< X %"-Einstellung werden 1:1 aus dem PKS-Pivot übernommen. Zum Ändern den PKS-Tab nutzen.', prodNoFilters: '(keine Filter)',
     prodViewFull: 'Vollständig — alle Produkte ({0})', prodViewFiltered: 'Gefiltert — < {0} % ausgeblendet ({1} Produkte)', prodMeasureNote: '„< X %"-Basis: Anteil von {0} am Gesamt',
     prodSheetFull: 'Vollständig', prodSheetFiltered: 'Gefiltert < {0}%',
+    prodMeasure: 'Nettovertriebsleistung', prodMeasureHint: 'Σ sum_td_nettovertriebsleistung — Basis für die „< X %"-Filterung',
     prodMetric: 'Kennzahl', prodTotalCol: 'Gesamt', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Sonstige',
     prodShowAs: 'Werte:', prodAbs: 'Absolut', prodRel: 'Relativ', prodPreset: 'Vorfilter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Filter bearbeiten (klicken)', prodExcel: 'Excel ⤓',
     prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
@@ -567,6 +568,7 @@ const I18N = {
     prodFromPks: 'From PKS pivot:', prodFromPksHint: 'Filters and the "< X %" setting are taken 1:1 from the PKS pivot. Change them in the PKS tab.', prodNoFilters: '(no filters)',
     prodViewFull: 'Full — all products ({0})', prodViewFiltered: 'Filtered — < {0} % hidden ({1} products)', prodMeasureNote: '"< X %" basis: share of {0} of the total',
     prodSheetFull: 'Full', prodSheetFiltered: 'Filtered < {0}%',
+    prodMeasure: 'Nettovertriebsleistung', prodMeasureHint: 'Σ sum_td_nettovertriebsleistung — basis for the "< X %" filtering',
     prodMetric: 'Metric', prodTotalCol: 'Total', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Other',
     prodShowAs: 'Values:', prodAbs: 'Absolute', prodRel: 'Relative', prodPreset: 'Pre-filter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Edit filter (click)', prodExcel: 'Excel ⤓',
     prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
@@ -2377,6 +2379,7 @@ function productsTidyTable(prods, totalRow) {
   const ratio = (a, b) => b > 0 ? a / b : null;
   const cols = [
     { name: tt('prodColProduct'),   kind:'text', get: r => r.__label },
+    { name: tt('prodMeasure'),      kind:'num',  get: r => Number(r.msr) },
     { name: tt('prodColN'),         kind:'num',  get: r => Number(r.n) },
     { name: tt('prodColYoung'),     kind:'num',  get: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
     { name: tt('prodColYoungAbs'),  kind:'num',  get: r => Number(r.young_ja) },
@@ -2393,12 +2396,16 @@ function productsTidyTable(prods, totalRow) {
 }
 
 // Split the cached product rows into the Full list and the "< X %"-Filtered list.
+// Share basis is the PKS measure (Nettovertriebsleistung); if that is unusable (all
+// null / 0) we fall back to the record count so the filtered view still prunes.
 function productsSplit(d) {
   const totalRow = d.rows.find(r => Number(r.is_total) === 1) || {};
   const allProds = d.rows.filter(r => Number(r.is_total) !== 1);
-  const thr = (d.thrPct || 0) / 100, totMsr = Math.abs(Number(totalRow.msr) || 0);
-  const filtered = totMsr > 0 ? allProds.filter(r => Math.abs(Number(r.msr) || 0) / totMsr >= thr) : allProds;
-  return { totalRow, allProds, filtered };
+  const thr = (d.thrPct || 0) / 100;
+  let basis = 'msr', tot = Math.abs(Number(totalRow.msr) || 0);
+  if (!(tot > 0)) { basis = 'n'; tot = Math.abs(Number(totalRow.n) || 0); }
+  const filtered = (tot > 0 && thr > 0) ? allProds.filter(r => Math.abs(Number(r[basis]) || 0) / tot >= thr) : allProds;
+  return { totalRow, allProds, filtered, basis };
 }
 
 async function refreshProductsView() {
@@ -2451,10 +2458,12 @@ function renderProductsMode() {
   const showAbs = state.productsShowAs === 'abs';
   const fmtVal = (m, r) => { if (!showAbs && m.rel) { const v = m.rel(r); return v === null ? '—' : fmtPct(v); } return fmtNum(Number(m.abs(r))); };
 
+  const { totalRow, allProds, filtered: filteredProds } = productsSplit(data);
+
   // Metrics are the rows; products are the columns. The Online block is highlighted and its
   // "thereof" rows are indented. The toggle picks absolute count vs. relative share per metric.
   const metrics = [
-    { label: tt('prodColN'),       abs: r => Number(r.n), rel: null },
+    { label: tt('prodMeasure'),    title: tt('prodMeasureHint'), abs: r => Number(r.msr), rel: r => ratio(Number(r.msr), Number(totalRow.msr)) },
     { label: tt('prodMYoung'),     title: tt('prodYoungHint'),   abs: r => Number(r.young_ja), rel: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
     { label: tt('prodOnlineTotal'),title: tt('prodOnlineHint'),  online:'strong',             abs: r => Number(r.int_intern) + Number(r.int_extern), rel: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
     { label: tt('prodOnlineIntAbs'),title: tt('prodIntHint'),    online:true, thereof:true,   abs: r => Number(r.int_intern), rel: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
@@ -2468,8 +2477,6 @@ function renderProductsMode() {
   const labelBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : 'var(--bg)');
   const cellBg = (m) => m.online === 'strong' ? PROD_ONLINE_BG_STRONG : (m.online ? PROD_ONLINE_BG : null);
   const headBg = 'var(--header-bg)';
-
-  const { totalRow, allProds, filtered: filteredProds } = productsSplit(data);
 
   // Build one transposed grid (metrics × the given product columns), grouped by technology.
   const buildGrid = (prods) => {
