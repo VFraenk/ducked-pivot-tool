@@ -428,6 +428,32 @@
 <script type="module">
 import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm';
 
+/* ============================================================================
+ * TABLE OF CONTENTS  —  this app is one portable HTML file (open it directly,
+ * no build/server needed). To jump to a section, search (Ctrl/Cmd-F) for its
+ * banner title below, e.g. "PRODUCTS MODE". Sections appear in this order:
+ *
+ *   STATE ................. central `state` object, locales, constants
+ *   I18N .................. German/English UI strings (tt())
+ *   DOM HELPERS ........... el(), $/$$, toast()
+ *   SQL ESCAPING .......... qid(), qlit()
+ *   FILTER SERIALIZATION .. Set <-> Array for persisted filters
+ *   PERSISTENCE ........... localStorage (view prefs) + IndexedDB (files)
+ *   DUCKDB INIT ........... initDuckDB(), runQuery()
+ *   LOAD PARQUET .......... loadFiles(), registerParquet()
+ *   FILTER -> SQL ......... buildWhere(), pivot/PKS preset config
+ *   RENDER HELPERS ........ renderAll(), renderContent(), switchMode()
+ *   TABLE MODE ............ raw grid + paging
+ *   FILTER DIALOG ......... shared values/num/text/date dialog (all modes)
+ *   PIVOT MODE ............ pivot + PKS report
+ *   PRODUCTS MODE ......... per-product-cluster report (products as columns)
+ *   SQL CONSOLE MODE ...... CodeMirror editor
+ *   EXPORT ................ CSV/JSON/Parquet/Excel
+ *   SETTINGS & SESSION MENUS
+ *   SESSION RESTORE
+ *   BOOT .................. entry point (bottom of file)
+ * ========================================================================== */
+
 // ============================================================
 // STATE
 // ============================================================
