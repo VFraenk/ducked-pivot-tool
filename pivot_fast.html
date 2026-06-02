@@ -435,7 +435,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null, productsData: null,
+  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null, productsData: null, productsShowAs: 'rel',
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -466,6 +466,7 @@ const I18N = {
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
     prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster (Produkte als Spalten) — PKS-Vorfilter aktiv (ohne td_bb_technik); Filter unten frei anwendbar',
     prodMetric: 'Kennzahl', prodTotalCol: 'Gesamt', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Sonstige',
+    prodShowAs: 'Werte:', prodAbs: 'Absolut', prodRel: 'Relativ', prodPreset: 'Vorfilter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}',
     prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online gesamt',
     prodOnlineIntPct: 'dav. Intern %', prodOnlineIntAbs: 'dav. Intern', prodOnlineExtPct: 'dav. Extern %', prodOnlineExtAbs: 'dav. Extern',
@@ -535,6 +536,7 @@ const I18N = {
     table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
     prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster (products as columns) — PKS pre-filter applied (except td_bb_technik); filter the data freely below',
     prodMetric: 'Metric', prodTotalCol: 'Total', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Other',
+    prodShowAs: 'Values:', prodAbs: 'Absolute', prodRel: 'Relative', prodPreset: 'Pre-filter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}',
     prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online total',
     prodOnlineIntPct: 'thereof Intern %', prodOnlineIntAbs: 'thereof Intern', prodOnlineExtPct: 'thereof Extern %', prodOnlineExtAbs: 'thereof Extern',
@@ -727,7 +729,7 @@ function collectPrefs() {
   }
   return {
     version: 1,
-    global: { mode: state.mode, pageSize: state.pageSize, sidebarCollapsed: $('#sidebar')?.classList.contains('collapsed') || false, ...state.settings },
+    global: { mode: state.mode, pageSize: state.pageSize, productsShowAs: state.productsShowAs, sidebarCollapsed: $('#sidebar')?.classList.contains('collapsed') || false, ...state.settings },
     activeTable: state.activeTable,
     sqlText: state.sqlText,
     tables,
@@ -2263,6 +2265,13 @@ function productsPresetClauses(table) {
   if (has('fn_planungshauptgruppe_pk')) cl.push(`${qid('fn_planungshauptgruppe_pk')} IN ('ET', 'DP')`);
   return cl;
 }
+// Human-readable labels for the active pre-filter, shown to the user as read-only chips.
+function productsPresetLabels(table) {
+  const has = (c) => table.schema.some(s => s.name === c), out = [];
+  for (const c of ['funk_kenner', 'regio_kenner', 'hybrid_kenner']) if (has(c)) out.push(`${c} ${tt('prodPresetNe')}`);
+  if (has('fn_planungshauptgruppe_pk')) out.push(`fn_planungshauptgruppe_pk ${tt('prodPresetIn')}`);
+  return out;
+}
 
 // Custom product ordering: Total first, then by technology group
 // (kupfer → fiber_neu → fiber_alt → other), and within each group by tariff
@@ -2348,7 +2357,15 @@ function renderProductsMode() {
     el('div', { style:'font-size:11px; color:var(--text-faint); margin-top:2px;' }, tt('prodSubtitle'))
   ));
 
-  // ── Filter bar: active-filter pills + a column picker that opens the shared filter dialog ──
+  // ── Pre-filter chips (read-only): show exactly which PKS pre-filters are applied ──
+  const presetLabels = productsPresetLabels(table);
+  if (presetLabels.length) {
+    const pre = el('div', { class: 'pills-bar', style:'gap:6px;' }, el('span', { style:'font-size:11px; color:var(--text-dim); font-weight:600;' }, tt('prodPreset')));
+    for (const lbl of presetLabels) pre.appendChild(el('span', { class:'pill', style:'background:var(--bg-alt2); color:var(--text-dim); cursor:default;' }, lbl));
+    wrap.appendChild(pre);
+  }
+
+  // ── Filter bar: active-filter pills, a column picker, and the absolute/relative toggle ──
   const filters = state.filters[tn] || {};
   const pills = el('div', { class: 'pills-bar' });
   const colSel = el('select', { class:'btn btn-sm', style:'max-width:220px;', onchange: (e) => { const c = table.schema.find(x => x.name === e.target.value); e.target.value = ''; if (c) openFilterDialog(c, e.target); } },
@@ -2356,6 +2373,10 @@ function renderProductsMode() {
     ...table.schema.map(c => el('option', { value: c.name }, c.name)));
   pills.appendChild(colSel);
   for (const [col, f] of Object.entries(filters)) if (f) pills.appendChild(el('span', { class:'pill' }, `${col}: ${filterSummary(f)}`, el('span', { class:'x', onclick: () => { delete filters[col]; refreshProductsView(); } }, '×')));
+  // Absolute / relative segmented toggle (just re-renders; the data is the same either way).
+  const seg = (val, label) => el('button', { class:'btn btn-sm', style: state.productsShowAs === val ? 'background:var(--accent); color:#fff; border-color:var(--accent);' : '', onclick: () => { state.productsShowAs = val; scheduleSave(); renderContent(); } }, label);
+  pills.appendChild(el('span', { style:'margin-left:auto; display:flex; gap:6px; align-items:center;' },
+    el('span', { style:'font-size:11px; color:var(--text-dim);' }, tt('prodShowAs')), seg('abs', tt('prodAbs')), seg('rel', tt('prodRel'))));
   wrap.appendChild(pills);
 
   const data = state.productsData;
@@ -2363,20 +2384,20 @@ function renderProductsMode() {
   if (!data || data.error || !data.rows) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, data?.error || tt('loading'))); return wrap; }
 
   const ratio = (a, b) => b > 0 ? a / b : null;
-  const fmtVal = (m, r) => { const v = m.get(r); return m.fmt === 'pct' ? (v === null ? '—' : fmtPct(v)) : fmtNum(Number(v)); };
+  const showAbs = state.productsShowAs === 'abs';
+  // One row per metric; the toggle picks the absolute count or the relative share.
+  // `rel: null` (Records) is always shown as a count regardless of the toggle.
+  const fmtVal = (m, r) => { if (!showAbs && m.rel) { const v = m.rel(r); return v === null ? '—' : fmtPct(v); } return fmtNum(Number(m.abs(r))); };
 
   // Metrics become the rows; products become the columns. The Online block is highlighted
   // and its "thereof" rows are indented so the breakdown reads vertically.
   const metrics = [
-    { label: tt('prodColN'),        fmt:'num', get: r => Number(r.n) },
-    { label: tt('prodColYoung'),    fmt:'pct', title: tt('prodYoungHint'),   get: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
-    { label: tt('prodColYoungAbs'), fmt:'num', title: tt('prodYoungHint'),   get: r => Number(r.young_ja) },
-    { label: tt('prodOnlineTotal'), fmt:'pct', title: tt('prodOnlineHint'),  online:'strong', get: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
-    { label: tt('prodOnlineIntPct'),fmt:'pct', title: tt('prodIntHint'),     online:true, thereof:true, get: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
-    { label: tt('prodOnlineIntAbs'),fmt:'num', title: tt('prodIntHint'),     online:true, thereof:true, get: r => Number(r.int_intern) },
-    { label: tt('prodOnlineExtPct'),fmt:'pct', title: tt('prodExtHint'),     online:true, thereof:true, get: r => ratio(Number(r.int_extern), Number(r.kanal_tot)) },
-    { label: tt('prodOnlineExtAbs'),fmt:'num', title: tt('prodExtHint'),     online:true, thereof:true, get: r => Number(r.int_extern) },
-    { label: tt('prodColWinback'),  fmt:'pct', title: tt('prodWinbackHint'), get: r => ratio(Number(r.wb_1), Number(r.wb_tot)) },
+    { label: tt('prodColN'),       abs: r => Number(r.n), rel: null },
+    { label: tt('prodMYoung'),     title: tt('prodYoungHint'),   abs: r => Number(r.young_ja), rel: r => ratio(Number(r.young_ja), Number(r.young_tot)) },
+    { label: tt('prodOnlineTotal'),title: tt('prodOnlineHint'),  online:'strong',             abs: r => Number(r.int_intern) + Number(r.int_extern), rel: r => ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot)) },
+    { label: tt('prodOnlineIntAbs'),title: tt('prodIntHint'),    online:true, thereof:true,   abs: r => Number(r.int_intern), rel: r => ratio(Number(r.int_intern), Number(r.kanal_tot)) },
+    { label: tt('prodOnlineExtAbs'),title: tt('prodExtHint'),    online:true, thereof:true,   abs: r => Number(r.int_extern), rel: r => ratio(Number(r.int_extern), Number(r.kanal_tot)) },
+    { label: tt('prodMWinback'),   title: tt('prodWinbackHint'), abs: r => Number(r.wb_1), rel: r => ratio(Number(r.wb_1), Number(r.wb_tot)) },
   ];
 
   const prodTech = (name) => { const s = String(name || '').toLowerCase(); return s.includes('kupfer') ? 'kupfer' : s.includes('fiber_neu') ? 'fiber_neu' : s.includes('fiber_alt') ? 'fiber_alt' : 'other'; };
@@ -2891,6 +2912,7 @@ async function restoreSession(prefs) {
     if (g.sidebarWidth) state.settings.sidebarWidth = g.sidebarWidth;
     if (g.pivotFieldsWidth) state.settings.pivotFieldsWidth = g.pivotFieldsWidth;
     if (g.pageSize) state.pageSize = g.pageSize;
+    if (g.productsShowAs) state.productsShowAs = g.productsShowAs;
     if (g.mode) state.mode = g.mode;
     if (typeof prefs.sqlText === 'string') state.sqlText = prefs.sqlText;
     rebuildNumberFormats();
