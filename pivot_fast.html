@@ -435,7 +435,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null,
+  pivot: {}, pksPivot: {}, pivotData: null, pivotShape: null, productsData: null,
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -463,7 +463,14 @@ const I18N = {
     initializing: 'wird initialisiert…', ready: 'DuckDB bereit', failed: 'DuckDB FEHLER', restoring: 'wird wiederhergestellt…',
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
-    table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
+    table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
+    prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster (über die gesamte Tabelle, ohne PKS-Filter)',
+    prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
+    prodColIntInternAbs: 'INT intern PK', prodColIntInternPct: 'INT intern PK %',
+    prodColIntExternAbs: 'INT extern PK', prodColIntExternPct: 'INT extern PK %',
+    prodColOnline: 'Online-Anteil', prodColWinback: 'Winback-Anteil',
+    prodTotal: 'Gesamt (alle Produkte)', prodNoCluster: 'Spalte „tsc_pks_product_cluster" in dieser Tabelle nicht gefunden.', prodNoData: 'Keine Daten.',
+    prodYoungHint: 'JA / (JA + NEIN) aus fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / alle Kanäle (kanal)', prodWinbackHint: '1 / (0 + 1) aus winback_kenner',
     resetPreset: 'Zurücksetzen', fiberLabel: 'Technik:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: „Ohne Fiber" = ≠ Fiber, „Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
     sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
@@ -523,7 +530,14 @@ const I18N = {
     initializing: 'initializing…', ready: 'duckdb ready', failed: 'duckdb FAILED', restoring: 'restoring…',
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
-    table: 'Table', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
+    table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
+    prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster (across the whole table, no PKS filter)',
+    prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
+    prodColIntInternAbs: 'INT intern PK', prodColIntInternPct: 'INT intern PK %',
+    prodColIntExternAbs: 'INT extern PK', prodColIntExternPct: 'INT extern PK %',
+    prodColOnline: 'Online share', prodColWinback: 'Winback share',
+    prodTotal: 'Total (all products)', prodNoCluster: 'Column "tsc_pks_product_cluster" not found in this table.', prodNoData: 'No data.',
+    prodYoungHint: 'YES / (YES + NO) from fn_young_tarif_text', prodOnlineHint: '(INT intern PK + INT extern PK) / all channels (kanal)', prodWinbackHint: '1 / (0 + 1) from winback_kenner',
     resetPreset: 'Reset', fiberLabel: 'Tech:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: "Ohne Fiber" = ≠ Fiber, "Nur Fiber" = = Fiber',
     splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
     sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
@@ -1104,6 +1118,7 @@ async function refreshTableView() {
 async function refreshActiveView() {
   if (state.mode === 'table') return refreshTableView();
   if (state.mode === 'pivot' || state.mode === 'pks') return refreshPivotView();
+  if (state.mode === 'products') return refreshProductsView();
 }
 
 // RENDER HELPERS
@@ -1155,10 +1170,12 @@ function renderContent() {
     el('button', { class: 'mode-tab' + (state.mode==='table'?' active':''), onclick: () => switchMode('table') }, tt('table')),
     el('button', { class: 'mode-tab' + (state.mode==='pivot'?' active':''), onclick: () => switchMode('pivot') }, tt('pivot')),
     el('button', { class: 'mode-tab' + (state.mode==='pks'?' active':''), onclick: () => switchMode('pks') }, tt('pks')),
+    el('button', { class: 'mode-tab' + (state.mode==='products'?' active':''), onclick: () => switchMode('products') }, tt('products')),
     el('button', { class: 'mode-tab' + (state.mode==='sql'?' active':''), onclick: () => switchMode('sql') }, tt('sql'))
   ));
   if (state.mode === 'table') root.appendChild(renderTableMode());
   else if (state.mode === 'pivot' || state.mode === 'pks') root.appendChild(renderPivotMode());
+  else if (state.mode === 'products') root.appendChild(renderProductsMode());
   else if (state.mode === 'sql') root.appendChild(renderSQLMode());
 }
 
@@ -1168,7 +1185,7 @@ function switchMode(m) {
   if (m === 'pivot' || m === 'pks') { sidebar.classList.add('collapsed'); toggleBtn.textContent = tt('schemaHide'); }
   else { sidebar.classList.remove('collapsed'); toggleBtn.textContent = tt('schemaShow'); }
   renderContent();
-  if (m === 'table') refreshTableView(); if (m === 'pivot' || m === 'pks') setTimeout(() => refreshPivotView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
+  if (m === 'table') refreshTableView(); if (m === 'pivot' || m === 'pks') setTimeout(() => refreshPivotView(), 0); if (m === 'products') setTimeout(() => refreshProductsView(), 0); if (m === 'sql') setTimeout(() => initSQLEditor(), 0);
   scheduleSave();
 }
 
@@ -2221,6 +2238,131 @@ function fmtPct(ratio) {
 }
 
 // ============================================================
+// PRODUCTS MODE
+// A fixed report (no editable pivot) showing, per tsc_pks_product_cluster,
+// the Young / Online / Winback shares. Computed over the whole active table,
+// independent of the table/PKS filters. Denominators use only the listed
+// values: Young = JA/(JA+NEIN), Online = (INT intern PK + INT extern PK) / all
+// non-null channels, Winback = 1/(0+1).
+// ============================================================
+const PRODUCTS_CLUSTER_COL = 'tsc_pks_product_cluster';
+
+function productsQuery(table, tn) {
+  const cols = new Set(table.schema.map(c => c.name)), has = (c) => cols.has(c);
+  const prod = qid(PRODUCTS_CLUSTER_COL);
+  // When a source column is absent we emit 0 so the metric simply shows blank.
+  const young = (c) => has('fn_young_tarif_text')
+    ? `COUNT(*) FILTER (WHERE upper(trim(CAST(${qid('fn_young_tarif_text')} AS VARCHAR))) IN (${c}))` : '0';
+  const kanal = (c) => has('kanal') ? `COUNT(*) FILTER (WHERE ${c})` : '0';
+  const wb = (c) => has('winback_kenner')
+    ? `COUNT(*) FILTER (WHERE lower(CAST(${qid('winback_kenner')} AS VARCHAR)) IN (${c}))` : '0';
+  return `SELECT
+      ${prod} AS product,
+      GROUPING(${prod}) AS is_total,
+      COUNT(*) AS n,
+      ${young("'JA'")} AS young_ja,
+      ${young("'JA','NEIN'")} AS young_tot,
+      ${kanal(`${qid('kanal')} = 'INT intern PK'`)} AS int_intern,
+      ${kanal(`${qid('kanal')} = 'INT extern PK'`)} AS int_extern,
+      ${kanal(`${qid('kanal')} IS NOT NULL`)} AS kanal_tot,
+      ${wb("'1','true'")} AS wb_1,
+      ${wb("'0','1','true','false'")} AS wb_tot
+    FROM ${qid(tn)}
+    GROUP BY GROUPING SETS ((${prod}), ())
+    ORDER BY is_total DESC, n DESC`;
+}
+
+// Wraps the raw aggregation into the labelled, ratio-computed columns shown in the UI,
+// so CSV / Excel / JSON / Parquet exports match the on-screen table.
+function productsExportSql(table, tn) {
+  const L = (k) => qlit(tt(k));
+  return `WITH p AS (${productsQuery(table, tn)}) SELECT
+      CASE WHEN is_total = 1 THEN ${L('prodTotal')} ELSE COALESCE(CAST(product AS VARCHAR), 'NULL') END AS ${qid(tt('prodColProduct'))},
+      n AS ${qid(tt('prodColN'))},
+      TRY_CAST(young_ja AS DOUBLE) / NULLIF(young_tot, 0) AS ${qid(tt('prodColYoung'))},
+      young_ja AS ${qid(tt('prodColYoungAbs'))},
+      int_intern AS ${qid(tt('prodColIntInternAbs'))},
+      TRY_CAST(int_intern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColIntInternPct'))},
+      int_extern AS ${qid(tt('prodColIntExternAbs'))},
+      TRY_CAST(int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColIntExternPct'))},
+      TRY_CAST(int_intern + int_extern AS DOUBLE) / NULLIF(kanal_tot, 0) AS ${qid(tt('prodColOnline'))},
+      TRY_CAST(wb_1 AS DOUBLE) / NULLIF(wb_tot, 0) AS ${qid(tt('prodColWinback'))}
+    FROM p ORDER BY is_total DESC, n DESC`;
+}
+
+async function refreshProductsView() {
+  if (!state.activeTable) return;
+  const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
+  if (!table.schema.some(c => c.name === PRODUCTS_CLUSTER_COL)) { state.productsData = { missing: true }; renderContent(); return; }
+  try {
+    const res = await runQuery(productsQuery(table, tn));
+    state.productsData = { rows: res.rows, ms: res.ms };
+  } catch (e) { state.productsData = { error: e.message }; toast(tt('queryError', e.message), true); }
+  renderContent();
+}
+
+function renderProductsMode() {
+  const wrap = el('div', { class: 'grid-wrap' });
+  wrap.appendChild(el('div', { style:'padding:8px 12px;' },
+    el('div', { style:'font-size:14px; font-weight:600; color:var(--text);' }, tt('prodTitle')),
+    el('div', { style:'font-size:11px; color:var(--text-faint); margin-top:2px;' }, tt('prodSubtitle'))
+  ));
+  const data = state.productsData;
+  if (data?.missing) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, tt('prodNoCluster'))); return wrap; }
+  if (!data || data.error || !data.rows) { wrap.appendChild(el('div', { style:'padding:20px; color:var(--text-faint);' }, data?.error || tt('loading'))); return wrap; }
+
+  const ratio = (a, b) => b > 0 ? a / b : null;
+  const pctCell = (r) => el('td', { class:'num' }, r === null ? '—' : fmtPct(r));
+  const numCell = (v) => el('td', { class:'num' }, fmtNum(Number(v)));
+
+  const gridScroll = el('div', { class: 'grid-scroll' }), grid = el('table', { class: 'dgrid' });
+  const headCell = (label, title) => el('th', { title: title || null }, el('div', { class:'th-inner' }, el('span', { class:'col-name' }, label)));
+  grid.appendChild(el('thead', null, el('tr',
+    null,
+    headCell(tt('prodColProduct')),
+    headCell(tt('prodColN')),
+    headCell(tt('prodColYoung'), tt('prodYoungHint')),
+    headCell(tt('prodColYoungAbs'), tt('prodYoungHint')),
+    headCell(tt('prodColIntInternAbs'), tt('prodOnlineHint')),
+    headCell(tt('prodColIntInternPct'), tt('prodOnlineHint')),
+    headCell(tt('prodColIntExternAbs'), tt('prodOnlineHint')),
+    headCell(tt('prodColIntExternPct'), tt('prodOnlineHint')),
+    headCell(tt('prodColOnline'), tt('prodOnlineHint')),
+    headCell(tt('prodColWinback'), tt('prodWinbackHint'))
+  )));
+  const tbody = el('tbody');
+  if (data.rows.length === 0) tbody.appendChild(el('tr', null, el('td', { colspan: 10, style:'text-align:center; padding:20px; color:var(--text-faint);' }, tt('prodNoData'))));
+  for (const r of data.rows) {
+    const isTotal = Number(r.is_total) === 1;
+    const label = isTotal ? tt('prodTotal') : (r.product === null || r.product === undefined ? 'NULL' : String(r.product));
+    const tr = el('tr', { style: isTotal ? 'font-weight:600; background:var(--row-total, rgba(46,95,163,0.08));' : null },
+      el('td', { class: (r.product === null && !isTotal) ? 'null' : '' }, label),
+      numCell(r.n),
+      pctCell(ratio(Number(r.young_ja), Number(r.young_tot))),
+      numCell(r.young_ja),
+      numCell(r.int_intern),
+      pctCell(ratio(Number(r.int_intern), Number(r.kanal_tot))),
+      numCell(r.int_extern),
+      pctCell(ratio(Number(r.int_extern), Number(r.kanal_tot))),
+      pctCell(ratio(Number(r.int_intern) + Number(r.int_extern), Number(r.kanal_tot))),
+      pctCell(ratio(Number(r.wb_1), Number(r.wb_tot)))
+    );
+    tbody.appendChild(tr);
+  }
+  grid.appendChild(tbody); gridScroll.appendChild(grid); wrap.appendChild(gridScroll);
+
+  const nloc = activeLocale().intl;
+  wrap.appendChild(el('div', { class: 'statusbar' },
+    el('span', null, tt('rowsN', Math.max(0, data.rows.length - 1).toLocaleString(nloc))),
+    el('span', { style:'margin-left:auto; display:flex; gap:8px; align-items:center;' },
+      el('span', { style:'border-left:1px solid var(--border); padding-left:8px;' }, `${(data.ms || 0).toFixed(0)} ms`),
+      el('button', { class:'btn btn-sm', onclick: () => openExportMenu('products') }, tt('export'))
+    )
+  ));
+  return wrap;
+}
+
+// ============================================================
 // SQL CONSOLE MODE
 // ============================================================
 let sqlEditor = null;
@@ -2522,6 +2664,10 @@ async function exportXlsx(source) {
     } else if (source === 'sql') {
       if (!state.sqlResult) { toast(tt('runQueryFirst'), true); return; }
       buildTableSheet(wb, 'Query', state.sqlResult.rows, state.sqlResult.columns); fileBase = 'query_result';
+    } else if (source === 'products') {
+      const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
+      const res = await runQuery(productsExportSql(table, tn));
+      buildTableSheet(wb, tt('products'), res.rows, res.columns); fileBase = (tn || 'products') + '_products';
     } else {
       const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
       const filters = state.filters[tn] || {}, sort = state.sorts[tn];
@@ -2545,6 +2691,7 @@ async function doExport(source, format) {
       const filters = state.filters[tn] || {}, sort = state.sorts[tn];
       sql = `SELECT ${table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
     } else if (source === 'sql') { sql = sqlEditor ? sqlEditor.getValue() : state.sqlText; }
+    else if (source === 'products') { sql = productsExportSql(table, tn); }
     else if (source === 'pivot') {
       const pv = activePivot(), filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
       const allDims = [...pv.rows.map(r => r.col), ...pv.cols.map(c => c.col)];
