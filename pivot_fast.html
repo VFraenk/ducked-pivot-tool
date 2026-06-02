@@ -466,7 +466,7 @@ const I18N = {
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', products: 'Produkte', sql: 'SQL',
     prodTitle: 'Produkt-Kennzahlen', prodSubtitle: 'Anteile je tsc_pks_product_cluster (Produkte als Spalten) — PKS-Vorfilter aktiv (ohne td_bb_technik); Filter unten frei anwendbar',
     prodMetric: 'Kennzahl', prodTotalCol: 'Gesamt', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Sonstige',
-    prodShowAs: 'Werte:', prodAbs: 'Absolut', prodRel: 'Relativ', prodPreset: 'Vorfilter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}',
+    prodShowAs: 'Werte:', prodAbs: 'Absolut', prodRel: 'Relativ', prodPreset: 'Vorfilter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Filter bearbeiten',
     prodColProduct: 'Produkt', prodColN: 'Datensätze', prodColYoung: 'Young-Anteil', prodColYoungAbs: 'Young JA',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online gesamt',
     prodOnlineIntPct: 'dav. Intern %', prodOnlineIntAbs: 'dav. Intern', prodOnlineExtPct: 'dav. Extern %', prodOnlineExtAbs: 'dav. Extern',
@@ -536,7 +536,7 @@ const I18N = {
     table: 'Table', pivot: 'Pivot', pks: 'PKS', products: 'Products', sql: 'SQL',
     prodTitle: 'Product metrics', prodSubtitle: 'Shares per tsc_pks_product_cluster (products as columns) — PKS pre-filter applied (except td_bb_technik); filter the data freely below',
     prodMetric: 'Metric', prodTotalCol: 'Total', prodTechKupfer: 'Kupfer', prodTechFiberNeu: 'Fiber neu', prodTechFiberAlt: 'Fiber alt', prodTechOther: 'Other',
-    prodShowAs: 'Values:', prodAbs: 'Absolute', prodRel: 'Relative', prodPreset: 'Pre-filter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}',
+    prodShowAs: 'Values:', prodAbs: 'Absolute', prodRel: 'Relative', prodPreset: 'Pre-filter:', prodMYoung: 'Young', prodMWinback: 'Winback', prodPresetNe: '≠ True', prodPresetIn: '∈ {ET, DP}', prodEditFilter: 'Edit filter',
     prodColProduct: 'Product', prodColN: 'Records', prodColYoung: 'Young share', prodColYoungAbs: 'Young YES',
     prodOnlineGroup: 'Online', prodOnlineTotal: 'Online total',
     prodOnlineIntPct: 'thereof Intern %', prodOnlineIntAbs: 'thereof Intern', prodOnlineExtPct: 'thereof Extern %', prodOnlineExtAbs: 'thereof Extern',
@@ -2372,7 +2372,14 @@ function renderProductsMode() {
     el('option', { value:'' }, tt('prodAddFilter')),
     ...table.schema.map(c => el('option', { value: c.name }, c.name)));
   pills.appendChild(colSel);
-  for (const [col, f] of Object.entries(filters)) if (f) pills.appendChild(el('span', { class:'pill' }, `${col}: ${filterSummary(f)}`, el('span', { class:'x', onclick: () => { delete filters[col]; refreshProductsView(); } }, '×')));
+  // Active-filter pills: click the label to re-open the shared dialog (current selections pre-loaded)
+  // and change them; click × to remove the filter entirely.
+  for (const [col, f] of Object.entries(filters)) if (f) {
+    const colDef = table.schema.find(c => c.name === col);
+    pills.appendChild(el('span', { class:'pill' },
+      el('span', { style:'cursor:pointer;', title: tt('prodEditFilter'), onclick: (e) => { if (colDef) openFilterDialog(colDef, e.currentTarget); } }, `${col}: ${filterSummary(f)}`),
+      el('span', { class:'x', onclick: () => { delete filters[col]; refreshProductsView(); } }, '×')));
+  }
   // Absolute / relative segmented toggle (just re-renders; the data is the same either way).
   const seg = (val, label) => el('button', { class:'btn btn-sm', style: state.productsShowAs === val ? 'background:var(--accent); color:#fff; border-color:var(--accent);' : '', onclick: () => { state.productsShowAs = val; scheduleSave(); renderContent(); } }, label);
   pills.appendChild(el('span', { style:'margin-left:auto; display:flex; gap:6px; align-items:center;' },
