@@ -966,8 +966,8 @@ function ensurePksList(tn) {
   const cur = state.pksPivot[tn];
   if (Array.isArray(cur) && cur.length) return cur;
   if (cur && !Array.isArray(cur)) { state.pksPivot[tn] = [cur]; return state.pksPivot[tn]; }  // migrate legacy single config
-  const pv = pksPresetConfig(state.tables.find(t => t.name === tn)); pv.name = 'PKS 1';
-  state.pksPivot[tn] = [pv]; resolvePksKennerFilters(tn, pv);
+  const table = state.tables.find(t => t.name === tn);
+  state.pksPivot[tn] = PKS_DEFAULT_TABS.map(spec => pksPresetConfig(table, spec));            // Kupfer PKS / Fiber Neu / Fiber Alt
   return state.pksPivot[tn];
 }
 function pksActiveIdx(tn) {
@@ -979,53 +979,40 @@ function ensurePksPivot() {
   const tn = state.activeTable; if (!tn) return null;
   const list = ensurePksList(tn); return list[pksActiveIdx(tn)] || null;
 }
-// funk_/regio_/hybrid_kenner are value (multi-select) pre-filters like the Hauptplanungsgruppe one.
-// We can't know the values up front, so resolve them from the data: include every distinct value
-// except the "true"-like flags — i.e. keep the normal/non-special rows (funk_kenner ≠ True, etc.).
-async function resolvePksKennerFilters(tn, pv) {
-  const table = state.tables.find(t => t.name === tn);
-  if (!table || !pv) return;
-  const kenner = ['funk_kenner', 'regio_kenner', 'hybrid_kenner'].filter(c => table.schema.some(s => s.name === c));
-  let added = false;
-  for (const col of kenner) {
-    if (fieldForCol(pv, col)) continue;                      // already set (restored from session or user-edited)
-    try {
-      const res = await runQuery(`SELECT DISTINCT ${qid(col)} AS v FROM ${qid(tn)} WHERE ${qid(col)} IS NOT NULL LIMIT 1000`);
-      const keep = res.rows.map(r => r.v).filter(v => !isTruthyFlag(v));
-      if (keep.length === 0) continue;                       // nothing non-true to keep → don't filter to empty
-      pv.filters.push({ col, filter: { type: 'values', included: new Set(keep), includeBlank: true } });
-      added = true;
-    } catch (e) { console.warn('PKS kenner filter resolve failed for', col, e.message); }
-  }
-  if (added) { scheduleSave(); if (state.mode === 'pks') refreshPivotView(); }
-}
-// A true/false flag can arrive as a boolean, 0/1, or a "True"/"Wahr"/"yes" string.
-function isTruthyFlag(v) {
-  if (v === true) return true;
-  if (typeof v === 'number' || typeof v === 'bigint') return Number(v) !== 0;
-  if (typeof v === 'string') { const s = v.trim().toLowerCase(); return s === 'true' || s === 't' || s === '1' || s === 'ja' || s === 'yes' || s === 'wahr'; }
-  return false;
-}
 function activePivot() { return state.mode === 'pks' ? ensurePksPivot() : state.pivot[state.activeTable]; }
 
 // The td_bb_technik filter behind the Ohne Fiber / Nur Fiber toggle.
 function pksFiberFilter(only) { return only ? { type: 'text', op: 'eq', a: 'Fiber', not: false } : { type: 'text', op: 'eq', a: 'Fiber', not: true, keepNull: true }; }
 
 // Predefined PKS report, restricted to the columns the active table actually has.
-function pksPresetConfig(table) {
+// The three default PKS reports. They share the base filters (ET/DP, ≠regio, ≠funk), rows and
+// columns; they differ only in the technology (Fiber) and neues_fiber_portfolio filter.
+const PKS_DEFAULT_TABS = [
+  { name: 'Kupfer PKS', fiber: false, portfolio: 'kein neues Fiber Portfolio' },  // td_bb_technik ≠ Fiber
+  { name: 'Fiber Neu',  fiber: true,  portfolio: 'neues Fiber Portfolio' },       // td_bb_technik = Fiber
+  { name: 'Fiber Alt',  fiber: true,  portfolio: 'kein neues Fiber Portfolio' },  // td_bb_technik = Fiber
+];
+
+// Build one PKS report for `table`. opts = { name, fiber, portfolio }:
+//   fiber=false → td_bb_technik ≠ Fiber ("Ohne Fiber");  fiber=true → = Fiber ("Nur Fiber")
+//   portfolio   → neues_fiber_portfolio == <value>
+function pksPresetConfig(table, opts = {}) {
   const cols = new Set((table?.schema || []).map(c => c.name)), has = (c) => cols.has(c);
   const pv = newPivotState();
   pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'adj_phase_1_bb_agb_brutto' }, { col: 'tsc_pks_highlight' }].filter(r => has(r.col));
-  pv.cols = [{ col: 'anschluss_bandbreite_cluster' }].filter(r => has(r.col));
+  pv.cols = [{ col: 'neues_fiber_portfolio' }, { col: 'anschluss_bandbreite_cluster' }, { col: 'adj_bb_agb_preis_brutto' }].filter(r => has(r.col));
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
-  // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible
-  // (still scoped by the value filters below, not the raw data). The user can enable "< 1 %" to
-  // trim the long tail when they want to; doing so will, by design, pull the totals under 100%.
+  // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible.
   pv.hideBelowPct = false;
+  const notTrue = () => ({ type: 'text', op: 'eq', a: 'True', not: true, keepNull: true });   // != "True", NULLs kept
   const f = [];
   if (has('fn_planungshauptgruppe_pk')) f.push({ col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: new Set(['ET', 'DP']) } });
-  if (has('td_bb_technik')) f.push({ col: 'td_bb_technik', filter: pksFiberFilter(false) });
+  if (has('regio_kenner')) f.push({ col: 'regio_kenner', filter: notTrue() });
+  if (has('funk_kenner'))  f.push({ col: 'funk_kenner',  filter: notTrue() });
+  if (has('td_bb_technik')) f.push({ col: 'td_bb_technik', filter: pksFiberFilter(!!opts.fiber) });
+  if (opts.portfolio && has('neues_fiber_portfolio')) f.push({ col: 'neues_fiber_portfolio', filter: { type: 'values', included: new Set([opts.portfolio]) } });
   pv.filters = f;
+  if (opts.name) pv.name = opts.name;
   return pv;
 }
 
@@ -1836,7 +1823,7 @@ function renderPivotToolbar() {
     el('span', null, tt('sortCols')), sortSelect('colSort', colSort),
     el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
-    el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') { const list = ensurePksList(tn), i = pksActiveIdx(tn), fresh = pksPresetConfig(state.tables.find(t => t.name === tn)); fresh.name = list[i].name; list[i] = fresh; resolvePksKennerFilters(tn, fresh); } else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
+    el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') { const list = ensurePksList(tn), i = pksActiveIdx(tn), cur = list[i], spec = PKS_DEFAULT_TABS.find(s => s.name === cur.name) || {}; const fresh = pksPresetConfig(state.tables.find(t => t.name === tn), spec); fresh.name = cur.name; list[i] = fresh; } else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
     state.mode === 'pks'
       ? renderPksFiberToggle(pv)
       : el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
