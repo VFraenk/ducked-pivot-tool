@@ -1996,19 +1996,66 @@ async function runPksKpiQuery(pv, tn, table) {
   const filterMap = {};
   for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
   const where = buildWhere(table, filterMap);
-  const colDims = pv.cols.map(c => c.col);
-  const groupCols = colDims.map((c, i) => `GROUPING(${qid(c)}) AS ${qid('g_'+i)}`);
-  const res = await runQuery(`SELECT ${[...colDims.map(qid), ...groupCols, ...sel].join(', ')} FROM ${qid(tn)} ${where} GROUP BY ROLLUP(${colDims.map(qid).join(', ')})`);
+  // Group by the SAME row × column rollups as the main grid, so each conditional sum is keyed by
+  // "rowKey#cKey" (cellMap convention). This lets the KPI block net out pruned row branches exactly
+  // like the grid totals when "< X%" is on — otherwise the KPIs would ignore pruning entirely.
+  const rowDims = pv.rows.map(r => r.col), colDims = pv.cols.map(c => c.col), allDims = [...rowDims, ...colDims];
+  const groupCols = allDims.map((c, i) => `GROUPING(${qid(c)}) AS ${qid('g_'+i)}`);
+  const groupClause = rowDims.length
+    ? `GROUP BY ROLLUP(${rowDims.map(qid).join(', ')}), ROLLUP(${colDims.map(qid).join(', ')})`
+    : `GROUP BY ROLLUP(${colDims.map(qid).join(', ')})`;
+  const res = await runQuery(`SELECT ${[...allDims.map(qid), ...groupCols, ...sel].join(', ')} FROM ${qid(tn)} ${where} ${groupClause}`);
   const num = (v) => Number(v) || 0;
   const map = new Map();
   for (const r of res.rows) {
-    let cDepth = colDims.length; for (let i = 0; i < colDims.length; i++) if (Number(r['g_'+i]) === 1) { cDepth = i; break; }
+    let rDepth = rowDims.length; for (let i = 0; i < rowDims.length; i++) if (Number(r['g_'+i]) === 1) { rDepth = i; break; }
+    let cDepth = colDims.length; for (let i = 0; i < colDims.length; i++) if (Number(r['g_'+(rowDims.length+i)]) === 1) { cDepth = i; break; }
+    const rowKey = safeJoin(rowDims.map(d => r[d]).slice(0, rDepth));
     const cKey = safeJoin(colDims.map(d => r[d]).slice(0, cDepth));
-    map.set(cKey, { total: num(r.total), online: num(r.online), intern: num(r.intern), extern: num(r.extern),
+    map.set(rowKey + '#' + cKey, { total: num(r.total), online: num(r.online), intern: num(r.intern), extern: num(r.extern),
       young: num(r.young), keinYoung: num(r.keinYoung), online_y: num(r.online_y), online_n: num(r.online_n),
       intern_y: num(r.intern_y), intern_n: num(r.intern_n), extern_y: num(r.extern_y), extern_n: num(r.extern_n) });
   }
   return { map, hasKanal, hasYoung };
+}
+
+const PKS_KPI_FIELDS = ['total','online','intern','extern','young','keinYoung','online_y','online_n','intern_y','intern_n','extern_y','extern_n'];
+
+// All-row measures for one column, minus any pruned row branches (prunedRoots) — mirrors the grid's
+// visibleTotal so KPI shares track the "< X%" toggle. Returns null when the column has no data.
+function pksKpiColMeasures(kpiData, cKey, prunedRoots) {
+  const all = kpiData.map.get('#' + cKey);
+  if (!all) return null;
+  if (!prunedRoots || !prunedRoots.length) return all;
+  const out = {}; for (const f of PKS_KPI_FIELDS) out[f] = all[f] || 0;
+  for (const pr of prunedRoots) {
+    const sub = kpiData.map.get(safeJoin(pr.vals) + '#' + cKey);
+    if (sub) for (const f of PKS_KPI_FIELDS) out[f] -= (sub[f] || 0);
+  }
+  return out;
+}
+
+// Flat list of KPI rows shared by the on-screen grid and the Excel export. `expand` is a Set of
+// expanded parent ids (screen) or true to expand every channel (export). Each row carries get(m)->abs.
+function pksKpiRowDefs(kpiData, expand) {
+  const rows = [], isExp = (id) => expand === true || (expand && expand.has(id));
+  const channel = (id, label, f, fy, fn) => {
+    rows.push({ id, label, depth: 0, collapsible: kpiData.hasYoung, expanded: isExp(id), get: f });
+    if (kpiData.hasYoung && isExp(id)) {
+      rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), depth: 1, get: fy });
+      rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), depth: 1, get: fn });
+    }
+  };
+  if (kpiData.hasKanal) {
+    channel('online', tt('kpiOnline'), m => m.online, m => m.online_y, m => m.online_n);
+    channel('intern', tt('kpiShareOf', PKS_KPI_ONLINE[0]), m => m.intern, m => m.intern_y, m => m.intern_n);
+    channel('extern', tt('kpiShareOf', PKS_KPI_ONLINE[1]), m => m.extern, m => m.extern_y, m => m.extern_n);
+  }
+  if (kpiData.hasYoung) {
+    rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), depth: 0, get: m => m.young });
+    rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), depth: 0, get: m => m.keinYoung });
+  }
+  return rows;
 }
 
 async function refreshPivotView() {
@@ -2184,7 +2231,7 @@ function pivotVisibility(sh, pv, prune) {
   const visLeafRows = prune ? sh.leafRows.filter(r => !hiddenRowKeys.has(r.key)) : sh.leafRows;
   const colHasData = (lc) => { if (!prune) return true; const cKey = safeJoin(lc.vals); for (const r of visLeafRows) if (cellsNonZero(cellMap.get(safeJoin(r.vals) + '#' + cKey))) return true; return false; };
   const visLeafCols = sh.leafCols.filter(colHasData);
-  return { visLeafCols, hiddenRowKeys, visibleTotal };
+  return { visLeafCols, hiddenRowKeys, visibleTotal, prunedRoots };
 }
 
 // Walk the visible leaf columns at one header level and emit each merged span. Identical span logic
@@ -2240,7 +2287,7 @@ function renderPivotGrid() {
   };
 
   // Prune fully-zero / below-threshold rows & columns and net them out of the totals.
-  const { visLeafCols, hiddenRowKeys, visibleTotal } = pivotVisibility(sh, pv, true);
+  const { visLeafCols, hiddenRowKeys, visibleTotal, prunedRoots } = pivotVisibility(sh, pv, true);
 
   for (let lvl = 0; lvl < colHeaderRows; lvl++) {
     const tr = el('tr');
@@ -2330,56 +2377,40 @@ function renderPivotGrid() {
     }
     tbody.appendChild(tr);
   }
-  if (state.mode === 'pks' && state.pksKpiData) appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs);
+  if (state.mode === 'pks' && state.pksKpiData) appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs, prunedRoots);
   table.appendChild(tbody); return table;
 }
 
-// Extra KPI rows under the PKS grid, aligned to the same visible columns. Each row carries an absolute
-// summed value (num) of the pivot value field; the "Show values as" dropdown decides whether the cell
-// shows that absolute (Absolute) or its share of the column total (any % mode). The channel rows are
-// collapsible — expanding one reveals its Young / Kein Young split.
-function appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs) {
-  const data = state.pksKpiData, map = data.map, expanded = state.pksKpiExpanded, asPct = showAs !== 'abs';
-  const rows = [];
-  // parent channel row + its young/non-young children (children only when young_kenner is present)
-  const channel = (id, label, num, yNum, nNum) => {
-    rows.push({ id, label, num, depth: 0, collapsible: data.hasYoung });
-    if (data.hasYoung && expanded.has(id)) {
-      rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), num: yNum, depth: 1 });
-      rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), num: nNum, depth: 1 });
-    }
-  };
-  if (data.hasKanal) {
-    channel('online', tt('kpiOnline'), m => m.online, m => m.online_y, m => m.online_n);
-    channel('intern', tt('kpiShareOf', PKS_KPI_ONLINE[0]), m => m.intern, m => m.intern_y, m => m.intern_n);
-    channel('extern', tt('kpiShareOf', PKS_KPI_ONLINE[1]), m => m.extern, m => m.extern_y, m => m.extern_n);
-  }
-  if (data.hasYoung) {
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), num: m => m.young, depth: 0 });
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), num: m => m.keinYoung, depth: 0 });
-  }
+// Extra KPI rows under the PKS grid, aligned to the same visible columns. Each row's value is a summed
+// portion of the pivot value field; the "Show values as" dropdown decides whether the cell shows that
+// absolute (Absolute) or its share of the column total (any % mode). Channel rows are collapsible —
+// expanding one reveals its Young / Kein Young split. Measures net out pruned rows (prunedRoots) so the
+// shares track the "< X%" toggle, just like the grid totals.
+function appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs, prunedRoots) {
+  const data = state.pksKpiData, expanded = state.pksKpiExpanded, asPct = showAs !== 'abs';
+  const rows = pksKpiRowDefs(data, expanded);
   if (!rows.length) return;
   const totalCols = 1 + visLeafCols.length * nValues + (hasColDims ? nValues : 0);
   tbody.appendChild(el('tr', { class:'pks-kpi-head' }, el('td', { colspan: totalCols }, tt('kpiTitle'))));
-  const cellText = (m, num) => {
+  const cellText = (cKey, get) => {
+    const m = pksKpiColMeasures(data, cKey, prunedRoots);
     if (!m) return '';
-    const v = num(m);
+    const v = get(m);
     if (!asPct) return Number(v) === 0 ? '' : fmtNum(v);            // Absolute
-    const r = m.total ? v / m.total : null;                        // share of column total
+    const r = m.total ? v / m.total : null;                        // share of (pruned) column total
     return (r === null || !isFinite(r) || Math.abs(r) < 0.0005) ? '' : fmtPct(r);
   };
   for (const kpi of rows) {
     const tr = el('tr', { class:'pks-kpi' + (kpi.depth ? ' pks-kpi-child' : '') });
     const labelTd = el('td', { class:'label', style:`padding-left:${20 + kpi.depth * 14}px;` });
     if (kpi.collapsible) {
-      const isExp = expanded.has(kpi.id);
-      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight,
-        onclick: () => { if (isExp) expanded.delete(kpi.id); else expanded.add(kpi.id); rerenderPivotKeepingScroll(); } }));
+      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: kpi.expanded ? ICONS.chevDown : ICONS.chevRight,
+        onclick: () => { if (kpi.expanded) expanded.delete(kpi.id); else expanded.add(kpi.id); rerenderPivotKeepingScroll(); } }));
       labelTd.appendChild(document.createTextNode(' ' + kpi.label));
     } else labelTd.textContent = kpi.label;
     tr.appendChild(labelTd);
-    for (const leafCol of visLeafCols) tr.appendChild(el('td', { colspan: nValues }, cellText(map.get(safeJoin(leafCol.vals)), kpi.num)));
-    if (hasColDims) tr.appendChild(el('td', { colspan: nValues, style:'border-left:2px solid var(--pv-border);' }, cellText(map.get(''), kpi.num)));
+    for (const leafCol of visLeafCols) tr.appendChild(el('td', { colspan: nValues }, cellText(safeJoin(leafCol.vals), kpi.get)));
+    if (hasColDims) tr.appendChild(el('td', { colspan: nValues, style:'border-left:2px solid var(--pv-border);' }, cellText('', kpi.get)));
     tbody.appendChild(tr);
   }
 }
@@ -2551,7 +2582,7 @@ function buildPivotSheet(wb, opts = {}) {
   const nValues = sh.valueDefs.length, D = sh.colDims.length, hasColDims = D > 0;
   const cellMap = sh.cellMap;
   // Same pruning/leftover-total rules as the on-screen grid; the full sheet keeps everything (prune=false).
-  const { visLeafCols: leafCols, hiddenRowKeys, visibleTotal } = pivotVisibility(sh, pv, reduced);
+  const { visLeafCols: leafCols, hiddenRowKeys, visibleTotal, prunedRoots } = pivotVisibility(sh, pv, reduced);
   const cellVal = (v) => (reduced && v !== null && v !== undefined && Number(v) === 0) ? null : v;
   const HEADER_ROWS = Math.max(1, D) + (nValues > 1 ? 1 : 0);
   const dataStartRow = HEADER_ROWS + 1;
@@ -2649,6 +2680,32 @@ function buildPivotSheet(wb, opts = {}) {
     r++;
   }
 
+  // ── KPI rows (PKS only): same share % as on screen, fully expanded, netting pruned rows like above ──
+  const kpiData = opts.kpiData || (state.mode === 'pks' ? state.pksKpiData : null);
+  if (kpiData && hasColDims) {
+    const kpiRows = pksKpiRowDefs(kpiData, true), kpiLastCol = gtColStart + nValues - 1;
+    if (kpiRows.length) {
+      const banner = ws.getRow(r).getCell(1);
+      banner.value = tt('kpiTitle'); banner.fill = solid('FF8FAADC'); banner.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      banner.alignment = { vertical: 'middle' }; banner.border = allBorders();
+      ws.mergeCells(r, 1, r, kpiLastCol); r++;
+      const writeKpi = (cell, cKey, get) => {
+        const m = pksKpiColMeasures(kpiData, cKey, prunedRoots);
+        const val = m && m.total ? get(m) / m.total : null;
+        if (val !== null && isFinite(val)) { cell.value = val; cell.numFmt = '0.0%'; }
+        cell.alignment = { horizontal: 'right' }; cell.border = allBorders(); cell.fill = solid('FFDCE6F3');
+      };
+      for (const kpi of kpiRows) {
+        const row = ws.getRow(r), lc = row.getCell(1);
+        lc.value = kpi.label; lc.alignment = { indent: kpi.depth, vertical: 'middle' };
+        lc.border = allBorders(); lc.fill = solid(kpi.depth ? 'FFDCE6F3' : 'FFC8D8EE'); lc.font = { bold: kpi.depth === 0 };
+        for (let i = 0; i < leafCols.length; i++) writeKpi(row.getCell(leafColStart(i)), safeJoin(leafCols[i].vals), kpi.get);
+        writeKpi(row.getCell(gtColStart), '', kpi.get);
+        r++;
+      }
+    }
+  }
+
   // ── column outline levels (collapse detail columns into their subtotal) ──
   if (hasColDims) {
     for (let i = 0; i < leafCols.length; i++) {
@@ -2714,7 +2771,9 @@ async function exportPksAllTabs() {
       if (!q) continue;
       // buildPivotSheet reads opts.data (not opts.rows); pass q.rows through explicitly so each tab
       // gets its OWN data instead of silently falling back to the active tab's state.pivotData.
-      const opts = { pv, rowDims: q.rowDims, colDims: q.colDims, valueDefs: q.valueDefs, data: q.rows };
+      // Compute this tab's KPIs too (state.pksKpiData only holds the active tab's).
+      const kpiData = await runPksKpiQuery(pv, tn, table).catch(() => null);
+      const opts = { pv, rowDims: q.rowDims, colDims: q.colDims, valueDefs: q.valueDefs, data: q.rows, kpiData };
       buildPivotSheet(wb, { ...opts, reduced: false, sheetName: `${name} (${tt('pksSheetFull')})` });
       buildPivotSheet(wb, { ...opts, reduced: true,  sheetName: `${name} (${tt('pksSheetFilt')})` });
       any = true;
