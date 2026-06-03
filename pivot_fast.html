@@ -288,6 +288,8 @@
   table.pgrid tr.pks-kpi-head td { background: var(--pv-grand-dark); color: #fff; font-weight: 700; border-top: 3px solid var(--pv-border); text-align: left; }
   table.pgrid tr.pks-kpi td { background: var(--pv-sub-col); font-weight: 600; }
   table.pgrid tr.pks-kpi td.label { background: var(--pv-sub-both); border-right: 2px solid var(--pv-border); }
+  table.pgrid tr.pks-kpi-child td { background: var(--pv-sub-row); font-weight: 400; }
+  table.pgrid tr.pks-kpi-child td.label { background: var(--pv-sub-col); font-weight: 400; }
   /* SQL console */
   .sql-mode { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .sql-edit-wrap { border-bottom: 1px solid var(--border); min-height: 80px; max-height: 50%; display: flex; flex-direction: column; resize: vertical; overflow: hidden; }
@@ -411,7 +413,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null,
+  pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null, pksKpiExpanded: new Set(),
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -474,7 +476,7 @@ const I18N = {
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
-    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}', kpiYoungQuote: 'Young-Quote (Young / Young+Kein Young)',
+    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}',
     run: '▶ Ausführen (Strg/Cmd+Enter)', sqlHint: 'Geladene Tabellen sind über ihren Namen abfragbar.', runToSee: 'Führe eine Abfrage aus, um Ergebnisse zu sehen.',
     rowsN: '{0} Zeilen', moreRows: '…{0} weitere Zeilen werden nicht angezeigt',
     expSpreadsheet: 'Tabellenkalkulation', expData: 'Daten',
@@ -538,7 +540,7 @@ const I18N = {
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
-    kpiTitle: 'KPIs – share of column total', kpiOnline: 'Online share', kpiShareOf: '{0} share', kpiYoungQuote: 'Young ratio (Young / Young+Kein Young)',
+    kpiTitle: 'KPIs – share of column total', kpiOnline: 'Online share', kpiShareOf: '{0} share',
     run: '▶ Run (Ctrl/Cmd+Enter)', sqlHint: 'Loaded tables are queryable by name.', runToSee: 'Run a query to see results.',
     rowsN: '{0} rows', moreRows: '…{0} more rows omitted from display',
     expSpreadsheet: 'Spreadsheet', expData: 'Data',
@@ -1966,16 +1968,19 @@ async function runPksKpiQuery(pv, tn, table) {
   const measure = qid(pv.values[0].col);
   const cond = (sql) => `COALESCE(SUM(CASE WHEN ${sql} THEN ${measure} END), 0)`;
   const sel = [`COALESCE(SUM(${measure}), 0) AS "total"`];
+  const k = qid(PKS_KPI_KANAL_COL), y = qid(PKS_KPI_YOUNG_COL);
+  const onlineQ = `${k} IN (${PKS_KPI_ONLINE.map(qlit).join(', ')})`, internQ = `${k} = ${qlit(PKS_KPI_ONLINE[0])}`, externQ = `${k} = ${qlit(PKS_KPI_ONLINE[1])}`;
+  const youngQ = `${y} = ${qlit(PKS_KPI_YOUNG)}`, nonYoungQ = `${y} = ${qlit(PKS_KPI_NONYOUNG)}`;
   if (hasKanal) {
-    const k = qid(PKS_KPI_KANAL_COL);
-    sel.push(`${cond(`${k} IN (${PKS_KPI_ONLINE.map(qlit).join(', ')})`)} AS "online"`);
-    sel.push(`${cond(`${k} = ${qlit(PKS_KPI_ONLINE[0])}`)} AS "intern"`);
-    sel.push(`${cond(`${k} = ${qlit(PKS_KPI_ONLINE[1])}`)} AS "extern"`);
+    sel.push(`${cond(onlineQ)} AS "online"`, `${cond(internQ)} AS "intern"`, `${cond(externQ)} AS "extern"`);
   }
   if (hasYoung) {
-    const y = qid(PKS_KPI_YOUNG_COL);
-    sel.push(`${cond(`${y} = ${qlit(PKS_KPI_YOUNG)}`)} AS "young"`);
-    sel.push(`${cond(`${y} = ${qlit(PKS_KPI_NONYOUNG)}`)} AS "keinYoung"`);
+    sel.push(`${cond(youngQ)} AS "young"`, `${cond(nonYoungQ)} AS "keinYoung"`);
+  }
+  if (hasKanal && hasYoung) {   // channel × young split, for the collapsible breakdowns
+    sel.push(`${cond(`${onlineQ} AND ${youngQ}`)} AS "online_y"`, `${cond(`${onlineQ} AND ${nonYoungQ}`)} AS "online_n"`);
+    sel.push(`${cond(`${internQ} AND ${youngQ}`)} AS "intern_y"`, `${cond(`${internQ} AND ${nonYoungQ}`)} AS "intern_n"`);
+    sel.push(`${cond(`${externQ} AND ${youngQ}`)} AS "extern_y"`, `${cond(`${externQ} AND ${nonYoungQ}`)} AS "extern_n"`);
   }
   const filterMap = {};
   for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
@@ -1983,11 +1988,14 @@ async function runPksKpiQuery(pv, tn, table) {
   const colDims = pv.cols.map(c => c.col);
   const groupCols = colDims.map((c, i) => `GROUPING(${qid(c)}) AS ${qid('g_'+i)}`);
   const res = await runQuery(`SELECT ${[...colDims.map(qid), ...groupCols, ...sel].join(', ')} FROM ${qid(tn)} ${where} GROUP BY ROLLUP(${colDims.map(qid).join(', ')})`);
+  const num = (v) => Number(v) || 0;
   const map = new Map();
   for (const r of res.rows) {
     let cDepth = colDims.length; for (let i = 0; i < colDims.length; i++) if (Number(r['g_'+i]) === 1) { cDepth = i; break; }
     const cKey = safeJoin(colDims.map(d => r[d]).slice(0, cDepth));
-    map.set(cKey, { total: Number(r.total)||0, online: Number(r.online)||0, intern: Number(r.intern)||0, extern: Number(r.extern)||0, young: Number(r.young)||0, keinYoung: Number(r.keinYoung)||0 });
+    map.set(cKey, { total: num(r.total), online: num(r.online), intern: num(r.intern), extern: num(r.extern),
+      young: num(r.young), keinYoung: num(r.keinYoung), online_y: num(r.online_y), online_n: num(r.online_n),
+      intern_y: num(r.intern_y), intern_n: num(r.intern_n), extern_y: num(r.extern_y), extern_n: num(r.extern_n) });
   }
   return { map, hasKanal, hasYoung };
 }
@@ -2311,33 +2319,56 @@ function renderPivotGrid() {
     }
     tbody.appendChild(tr);
   }
-  if (state.mode === 'pks' && state.pksKpiData) appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues);
+  if (state.mode === 'pks' && state.pksKpiData) appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs);
   table.appendChild(tbody); return table;
 }
 
-// Extra KPI rows under the PKS grid: each is a value share (% of the column's total), aligned to the
-// same visible columns as the grid. Young-Quote is the only one relative to (Young + Kein Young).
-function appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues) {
-  const data = state.pksKpiData, map = data.map, rows = [];
+// Extra KPI rows under the PKS grid, aligned to the same visible columns. Each row carries an absolute
+// summed value (num) of the pivot value field; the "Show values as" dropdown decides whether the cell
+// shows that absolute (Absolute) or its share of the column total (any % mode). The channel rows are
+// collapsible — expanding one reveals its Young / Kein Young split.
+function appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs) {
+  const data = state.pksKpiData, map = data.map, expanded = state.pksKpiExpanded, asPct = showAs !== 'abs';
+  const rows = [];
+  // parent channel row + its young/non-young children (children only when young_kenner is present)
+  const channel = (id, label, num, yNum, nNum) => {
+    rows.push({ id, label, num, depth: 0, collapsible: data.hasYoung });
+    if (data.hasYoung && expanded.has(id)) {
+      rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), num: yNum, depth: 1 });
+      rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), num: nNum, depth: 1 });
+    }
+  };
   if (data.hasKanal) {
-    rows.push({ label: tt('kpiOnline'), calc: m => m.total ? m.online / m.total : null });
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_ONLINE[0]), calc: m => m.total ? m.intern / m.total : null });
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_ONLINE[1]), calc: m => m.total ? m.extern / m.total : null });
+    channel('online', tt('kpiOnline'), m => m.online, m => m.online_y, m => m.online_n);
+    channel('intern', tt('kpiShareOf', PKS_KPI_ONLINE[0]), m => m.intern, m => m.intern_y, m => m.intern_n);
+    channel('extern', tt('kpiShareOf', PKS_KPI_ONLINE[1]), m => m.extern, m => m.extern_y, m => m.extern_n);
   }
   if (data.hasYoung) {
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), calc: m => m.total ? m.young / m.total : null });
-    rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), calc: m => m.total ? m.keinYoung / m.total : null });
-    rows.push({ label: tt('kpiYoungQuote'), calc: m => (m.young + m.keinYoung) ? m.young / (m.young + m.keinYoung) : null });
+    rows.push({ label: tt('kpiShareOf', PKS_KPI_YOUNG), num: m => m.young, depth: 0 });
+    rows.push({ label: tt('kpiShareOf', PKS_KPI_NONYOUNG), num: m => m.keinYoung, depth: 0 });
   }
   if (!rows.length) return;
   const totalCols = 1 + visLeafCols.length * nValues + (hasColDims ? nValues : 0);
   tbody.appendChild(el('tr', { class:'pks-kpi-head' }, el('td', { colspan: totalCols }, tt('kpiTitle'))));
-  const pct = (m, calc) => { const r = m ? calc(m) : null; return (r === null || !isFinite(r)) ? '' : fmtPct(r); };
+  const cellText = (m, num) => {
+    if (!m) return '';
+    const v = num(m);
+    if (!asPct) return Number(v) === 0 ? '' : fmtNum(v);            // Absolute
+    const r = m.total ? v / m.total : null;                        // share of column total
+    return (r === null || !isFinite(r) || Math.abs(r) < 0.0005) ? '' : fmtPct(r);
+  };
   for (const kpi of rows) {
-    const tr = el('tr', { class:'pks-kpi' });
-    tr.appendChild(el('td', { class:'label', style:'padding-left:20px;' }, kpi.label));
-    for (const leafCol of visLeafCols) tr.appendChild(el('td', { colspan: nValues }, pct(map.get(safeJoin(leafCol.vals)), kpi.calc)));
-    if (hasColDims) tr.appendChild(el('td', { colspan: nValues, style:'border-left:2px solid var(--pv-border);' }, pct(map.get(''), kpi.calc)));
+    const tr = el('tr', { class:'pks-kpi' + (kpi.depth ? ' pks-kpi-child' : '') });
+    const labelTd = el('td', { class:'label', style:`padding-left:${20 + kpi.depth * 14}px;` });
+    if (kpi.collapsible) {
+      const isExp = expanded.has(kpi.id);
+      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight,
+        onclick: () => { if (isExp) expanded.delete(kpi.id); else expanded.add(kpi.id); renderContent(); } }));
+      labelTd.appendChild(document.createTextNode(' ' + kpi.label));
+    } else labelTd.textContent = kpi.label;
+    tr.appendChild(labelTd);
+    for (const leafCol of visLeafCols) tr.appendChild(el('td', { colspan: nValues }, cellText(map.get(safeJoin(leafCol.vals)), kpi.num)));
+    if (hasColDims) tr.appendChild(el('td', { colspan: nValues, style:'border-left:2px solid var(--pv-border);' }, cellText(map.get(''), kpi.num)));
     tbody.appendChild(tr);
   }
 }
@@ -2670,8 +2701,11 @@ async function exportPksAllTabs() {
       const pv = list[i], name = pv.name || ('PKS ' + (i + 1));
       const q = await runPivotQuery(pv, tn, table);
       if (!q) continue;
-      buildPivotSheet(wb, { reduced: false, pv, ...q, sheetName: `${name} (${tt('pksSheetFull')})` });
-      buildPivotSheet(wb, { reduced: true,  pv, ...q, sheetName: `${name} (${tt('pksSheetFilt')})` });
+      // buildPivotSheet reads opts.data (not opts.rows); pass q.rows through explicitly so each tab
+      // gets its OWN data instead of silently falling back to the active tab's state.pivotData.
+      const opts = { pv, rowDims: q.rowDims, colDims: q.colDims, valueDefs: q.valueDefs, data: q.rows };
+      buildPivotSheet(wb, { ...opts, reduced: false, sheetName: `${name} (${tt('pksSheetFull')})` });
+      buildPivotSheet(wb, { ...opts, reduced: true,  sheetName: `${name} (${tt('pksSheetFilt')})` });
       any = true;
     }
     if (!any) { toast(tt('buildPivotFirst'), true); return; }
