@@ -2372,6 +2372,10 @@ function buildTableSheet(wb, name, rows, columns) {
   if (columns.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
 }
 
+// How many grouping levels the Excel opens with (rows & columns); deeper levels are present
+// but collapsed, expandable via the native outline controls.
+const XLSX_DEFAULT_LEVELS = 2;
+
 // Full, grouped, styled pivot. Rebuilds the shape fully-expanded (so every level
 // is present regardless of on-screen collapse state) and maps the hierarchy onto
 // native Excel row/column outline groups, mirroring the web pivot's drill-down.
@@ -2384,7 +2388,10 @@ function buildPivotSheet(wb, opts = {}) {
   const baseSh = opts.pv ? buildPivotShape(rowDims, colDims, valueDefs, data, pv) : state.pivotShape;  // full trees for expandAll
   const effSub = pv.subtotals === 'off' ? 'top' : pv.subtotals;   // grouping needs summary rows to collapse into
   const allExp = expandAll(pv, baseSh);                           // every node key from the (full) trees
-  const fullPv = { ...pv, subtotals: effSub, expanded: allExp.rows, colExpanded: allExp.cols };
+  // Always emit column subtotals in the export so each column level has a summary to collapse INTO
+  // (otherwise collapsing a column group jumps straight to the grand total). Rows already get them
+  // via effSub. This is export-only; the on-screen colSubShow preference is untouched.
+  const fullPv = { ...pv, subtotals: effSub, colSubShow: new Set(colDims), expanded: allExp.rows, colExpanded: allExp.cols };
   const sh = buildPivotShape(rowDims, colDims, valueDefs, data, fullPv);
 
   const nValues = sh.valueDefs.length, D = sh.colDims.length, hasColDims = D > 0;
@@ -2458,7 +2465,11 @@ function buildPivotSheet(wb, opts = {}) {
     else if (isSub) { lcell.fill = solid('FFDCE6F3'); lcell.font = { bold: depth === 0 }; }
     else lcell.fill = solid('FFF5F8FC');
     maxLabelLen = Math.max(maxLabelLen, String(lcell.value).length + depth * 2);
-    if (!isGrand) row.outlineLevel = Math.min(Math.max(depth, 0), 7);
+    if (!isGrand) {                                                          // open collapsed past level 2
+      row.outlineLevel = Math.min(Math.max(depth, 0), 7);
+      if (depth >= XLSX_DEFAULT_LEVELS) row.hidden = true;
+      else if (isSub && depth === XLSX_DEFAULT_LEVELS - 1) row.collapsed = true;   // summary whose detail is hidden
+    }
 
     const rKey = isGrand ? '' : safeJoin(node.vals);
     const writeVal = (cell, v, isColSub) => {
@@ -2490,7 +2501,11 @@ function buildPivotSheet(wb, opts = {}) {
     for (let i = 0; i < leafCols.length; i++) {
       const lc = leafCols[i];
       const lvl = lc.isColSubtotal ? lc.depth : Math.max(0, lc.vals.length - 1);
-      for (let vi = 0; vi < nValues; vi++) ws.getColumn(leafColStart(i) + vi).outlineLevel = Math.min(lvl, 7);
+      for (let vi = 0; vi < nValues; vi++) {                                  // open collapsed past level 2
+        const c = ws.getColumn(leafColStart(i) + vi); c.outlineLevel = Math.min(lvl, 7);
+        if (lvl >= XLSX_DEFAULT_LEVELS) c.hidden = true;
+        else if (lc.isColSubtotal && lc.depth === XLSX_DEFAULT_LEVELS - 1) c.collapsed = true;   // summary whose detail is hidden
+      }
     }
     for (let vi = 0; vi < nValues; vi++) ws.getColumn(gtColStart + vi).outlineLevel = 0;
   }
