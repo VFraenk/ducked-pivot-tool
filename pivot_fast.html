@@ -212,6 +212,7 @@
   .pivot-toolbar .btn-ico .icon { width: 12px; height: 12px; }
   .pivot-toolbar button.preset-on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .pivot-toolbar button.preset-on:hover { background: var(--accent); filter: brightness(1.08); }
+  .pivot-toolbar .pv-level { display: inline-flex; align-items: center; gap: 4px; }
   .pivot-toolbar .pv-hide-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; user-select: none; }
   .pivot-toolbar .pv-hide-toggle .pv-hide-cb { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   .pivot-toolbar .pv-hide-toggle input[type=checkbox] { margin: 0; }
@@ -464,6 +465,7 @@ const I18N = {
     presetApplied: 'PKS Filter gesetzt ({0} Felder)', presetCleared: 'PKS Filter entfernt', presetNoCols: 'Keine passenden Spalten für den PKS Filter gefunden',
     showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
     sortRows: 'Zeilen:', sortCols: 'Spalten:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Wert ↓', sortValAsc: 'Wert ↑',
+    rowLevel: 'Zeilen-Ebene:', colLevel: 'Spalten-Ebene:', levelAll: 'Alle',
     theme: 'Design', themeDefault: 'Standard (Blau)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
@@ -526,6 +528,7 @@ const I18N = {
     presetApplied: 'PKS filter applied ({0} fields)', presetCleared: 'PKS filter cleared', presetNoCols: 'No matching columns for the PKS filter',
     showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
     sortRows: 'Rows:', sortCols: 'Cols:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Value ↓', sortValAsc: 'Value ↑',
+    rowLevel: 'Row levels:', colLevel: 'Col levels:', levelAll: 'All',
     theme: 'Theme', themeDefault: 'Default (Blue)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
@@ -793,8 +796,20 @@ function applyTablePrefs(name, prefs) {
   state.hidden[name] = new Set(tp.hidden || []);
   state.colWidths[name] = tp.colWidths || {};
   state.pivot[name] = deserializePivot(tp.pivot);
-  if (tp.pksPivot) state.pksPivot[name] = (Array.isArray(tp.pksPivot) ? tp.pksPivot : [tp.pksPivot]).map(deserializePivot);
-  state.pksActive[name] = (typeof tp.pksActive === 'number') ? tp.pksActive : 0;
+  if (tp.pksPivot) {
+    let list = (Array.isArray(tp.pksPivot) ? tp.pksPivot : [tp.pksPivot]).map(deserializePivot);
+    // If the saved PKS tabs are still old auto-generated ones (no custom names), refresh them to the
+    // current named defaults (Kupfer PKS / Fiber Neu / Fiber Alt). Renamed/customised tabs are kept.
+    if (list.every(pv => !pv.name || /^PKS \d+$/.test(pv.name))) {
+      list = PKS_DEFAULT_TABS.map(spec => pksPresetConfig(state.tables.find(t => t.name === name), spec));
+      state.pksActive[name] = 0;
+    } else {
+      state.pksActive[name] = (typeof tp.pksActive === 'number') ? tp.pksActive : 0;
+    }
+    state.pksPivot[name] = list;
+  } else {
+    state.pksActive[name] = (typeof tp.pksActive === 'number') ? tp.pksActive : 0;
+  }
 }
 
 // ── IndexedDB: store raw parquet buffers so tables survive a page reload ──
@@ -1812,12 +1827,22 @@ function renderPivotToolbar() {
   const sortKey = (s) => `${s.by}-${s.dir}`;
   const onSort = (which, v) => { const [by, dir] = v.split('-'); pv[which] = { by, dir }; rebuildPivotShape(); renderContent(); scheduleSave(); };
   const sortSelect = (which, cur) => el('select', { class:'agg-select', onchange: (e) => onSort(which, e.target.value) }, sortOpts.map(([v,l]) => el('option', { value:v, selected: sortKey(cur)===v?'':null }, l)));
+  // Per-axis "show N levels" select (only when the axis has ≥2 dimensions and a shape exists).
+  const levelSelect = (axis) => {
+    const n = axis === 'row' ? pv.rows.length : pv.cols.length;
+    if (!state.pivotShape || n < 2) return null;
+    const cur = axisCurrentLevel(axis, pv), opts = [];
+    for (let l = 1; l <= n; l++) opts.push(l);
+    return el('span', { class:'pv-level' },
+      el('span', null, axis === 'row' ? tt('rowLevel') : tt('colLevel')),
+      el('select', { class:'agg-select', onchange: (e) => setAxisLevel(pv, axis, parseInt(e.target.value, 10)) },
+        opts.map(l => el('option', { value:String(l), selected: l === cur ? '' : null }, l === n ? tt('levelAll') : String(l)))));
+  };
   return el('div', { class:'pivot-toolbar' },
     el('span', null, tt('subtotals')), el('select', { class:'agg-select', onchange: (e) => { pv.subtotals = e.target.value; rebuildPivotShape(); renderContent(); } }, ['top','bottom','off'].map(o => el('option', { value:o, selected: pv.subtotals===o?'':null }, stLabels[o]))),
     el('span', null, tt('sortRows')), sortSelect('rowSort', rowSort),
     el('span', null, tt('sortCols')), sortSelect('colSort', colSort),
-    el('button', { onclick: () => { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; rebuildPivotShape(); renderContent(); } }, tt('expandAll')),
-    el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
+    levelSelect('row'), levelSelect('col'),
     el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') { const list = ensurePksList(tn), i = pksActiveIdx(tn), cur = list[i], spec = PKS_DEFAULT_TABS.find(s => s.name === cur.name) || {}; const fresh = pksPresetConfig(state.tables.find(t => t.name === tn), spec); fresh.name = cur.name; list[i] = fresh; } else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
     state.mode === 'pks'
       ? null
@@ -1846,6 +1871,29 @@ function expandAll(pv, sh = state.pivotShape) {
     const wc = (n) => { cs.add(n.key); (n.children||[]).forEach(wc); }; sh.colTree.forEach(wc);
   }
   return { rows: rs, cols: cs };
+}
+
+// Expand a row/col axis down to `level` (1-based): level 1 collapses everything to the first
+// dimension; level = dim-count shows every level. Drives the per-axis level selects in the toolbar.
+function setAxisLevel(pv, axis, level) {
+  const tree = axis === 'row' ? state.pivotShape?.rowTree : state.pivotShape?.colTree;
+  const set = new Set();
+  if (tree) { const walk = (n) => { if (n.depth <= level - 2) set.add(n.key); (n.children||[]).forEach(walk); }; tree.forEach(walk); }
+  if (axis === 'row') pv.expanded = set; else pv.colExpanded = set;
+  rebuildPivotShape(); renderContent(); scheduleSave();
+}
+// Best-effort current level for the select: the deepest level whose ancestors are all expanded.
+function axisCurrentLevel(axis, pv) {
+  const maxDepth = axis === 'row' ? pv.rows.length : pv.cols.length;
+  const tree = axis === 'row' ? state.pivotShape?.rowTree : state.pivotShape?.colTree;
+  const set = axis === 'row' ? pv.expanded : pv.colExpanded;
+  if (!tree || maxDepth <= 1) return maxDepth;
+  const byDepth = [];
+  const walk = (n) => { (byDepth[n.depth] = byDepth[n.depth] || []).push(n); (n.children||[]).forEach(walk); };
+  tree.forEach(walk);
+  let level = 1;
+  for (let d = 0; d <= maxDepth - 2; d++) { const arr = byDepth[d] || []; if (arr.length && arr.every(n => set.has(n.key))) level = d + 2; else break; }
+  return level;
 }
 function renderPivotStatusBar() { const nloc = activeLocale().intl; return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? tt('rowGroups', state.pivotShape.leafRows.length.toLocaleString(nloc), state.pivotShape.leafCols.length.toLocaleString(nloc)) : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
 
