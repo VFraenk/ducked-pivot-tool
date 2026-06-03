@@ -204,6 +204,18 @@
   .pks-tab-add { padding: 2px 9px; border: 1px dashed var(--border); border-bottom: none; border-radius: 5px 5px 0 0; background: transparent; color: var(--text-faint); cursor: pointer; font-size: 14px; line-height: 18px; }
   .pks-tab-add:hover { color: var(--accent); border-color: var(--accent); }
   .pks-tab-input { width: 90px; font: inherit; font-size: 12px; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 3px; background: var(--bg); color: var(--text); }
+  /* PKS stichtag date-range selector (sits at the right of the tab strip) */
+  .pks-daterange { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; align-self: center; padding: 0 6px 4px 14px; flex-shrink: 0; }
+  .pks-dr-text { display: inline-flex; flex-direction: column; line-height: 1.15; white-space: nowrap; }
+  .pks-dr-cap { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); }
+  .pks-dr-label { font-size: 12px; font-weight: 600; color: var(--text); }
+  .pks-dr-slider-wrap { position: relative; width: 170px; height: 22px; display: flex; align-items: center; }
+  .pks-dr-track { position: absolute; left: 0; right: 0; height: 4px; border-radius: 2px; background: var(--border-strong); }
+  .pks-dr-fill { position: absolute; height: 4px; border-radius: 2px; background: var(--accent); }
+  .pks-dr-slider-wrap input[type=range] { position: absolute; left: 0; width: 100%; height: 22px; margin: 0; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .pks-dr-slider-wrap input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,.45); cursor: pointer; }
+  .pks-dr-slider-wrap input[type=range]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,.45); cursor: pointer; }
+  .pks-dr-slider-wrap input[type=range]::-moz-range-track { background: none; border: none; }
   .pivot-toolbar { padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg-alt); align-items: center; font-size: 12px; flex-shrink: 0; }
   .pivot-toolbar button { padding: 3px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; font-size: 11px; }
   .pivot-toolbar button:hover { background: var(--bg-alt2); }
@@ -267,12 +279,14 @@
     font-weight: 500;
     border-right: 2px solid var(--pv-border);
   }
-  /* Row subtotals — soft blue-gray */
-  table.pgrid tr.subtotal td { background: var(--pv-sub-row); font-weight: 600; }
+  /* Row subtotals — soft blue-gray, with a horizontal rule above each sub-sum to separate groups */
+  table.pgrid tr.subtotal td { background: var(--pv-sub-row); font-weight: 600; border-top: 1.5px solid var(--pv-border); }
   table.pgrid tr.subtotal td.label { background: var(--pv-sub-col); }
   /* Top-level group rows: a stronger divider above and a deeper label shade for clear separation */
   table.pgrid tr.subtotal.lvl0 td { border-top: 3px solid var(--pv-h1); }
   table.pgrid tr.subtotal.lvl0 td.label { background: var(--pv-grp-label); }
+  /* Hover highlight on detail rows for easier row tracking (leaves the sticky label tint intact) */
+  table.pgrid tbody tr:not(.subtotal):not(.grandtotal):not(.pks-kpi):not(.pks-kpi-head):not(.pks-kpi-child):hover td { background: var(--row-hover); }
   /* Grand total row */
   table.pgrid tr.grandtotal td {
     background: var(--pv-grand);
@@ -413,7 +427,7 @@ const state = {
   db: null, conn: null, tables: [], activeTable: null, mode: 'table',
   filters: {}, sorts: {}, hidden: {}, colWidths: {}, page: 0, pageSize: 100,
   totalRows: 0, filteredRows: 0, lastQueryMs: 0, rows: [],
-  pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null, pksKpiExpanded: new Set(),
+  pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null, pksKpiExpanded: new Set(), pksMonths: {},
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
   settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
@@ -476,7 +490,7 @@ const I18N = {
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
-    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}',
+    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}', stichtagRange: 'Stichtag',
     run: '▶ Ausführen (Strg/Cmd+Enter)', sqlHint: 'Geladene Tabellen sind über ihren Namen abfragbar.', runToSee: 'Führe eine Abfrage aus, um Ergebnisse zu sehen.',
     rowsN: '{0} Zeilen', moreRows: '…{0} weitere Zeilen werden nicht angezeigt',
     expSpreadsheet: 'Tabellenkalkulation', expData: 'Daten',
@@ -540,7 +554,7 @@ const I18N = {
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
-    kpiTitle: 'KPIs – share of column total', kpiOnline: 'Online share', kpiShareOf: '{0} share',
+    kpiTitle: 'KPIs – share of column total', kpiOnline: 'Online share', kpiShareOf: '{0} share', stichtagRange: 'As-of date',
     run: '▶ Run (Ctrl/Cmd+Enter)', sqlHint: 'Loaded tables are queryable by name.', runToSee: 'Run a query to see results.',
     rowsN: '{0} rows', moreRows: '…{0} more rows omitted from display',
     expSpreadsheet: 'Spreadsheet', expData: 'Data',
@@ -1694,7 +1708,79 @@ function renderTabs() {
     bar.appendChild(tab);
   });
   bar.appendChild(el('button', { class:'pks-tab-add', title: tt('pksAddHint'), onclick: () => addTab() }, '+'));
+  if (state.mode === 'pks') {
+    const months = state.pksMonths[tn];
+    if (months && months.length > 1) bar.appendChild(renderPksDateRange(tn, months, ctx.list[ctx.active]));
+  }
   return bar;
+}
+
+// ── PKS stichtag (as-of) date-range selector ──────────────────────────────────────────────────────
+const STICHTAG_COL = 'stichtag_ts_yyyy_mm';
+
+// "2024-03" → locale month+year, e.g. "Mär 2024" / "Mar 2024". Falls back to the raw string.
+function fmtStichtag(s) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(s ?? ''));
+  if (!m) return String(s ?? '');
+  try { return new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString(activeLocale().intl, { month: 'short', year: 'numeric' }); }
+  catch (_) { return String(s); }
+}
+
+// Distinct sorted stichtag months for a table, cached. Empty array when the column is absent.
+async function ensurePksMonths(tn, table) {
+  if (state.pksMonths[tn]) return state.pksMonths[tn];
+  if (!table || !(table.schema || []).some(c => c.name === STICHTAG_COL)) { state.pksMonths[tn] = []; return []; }
+  try {
+    const res = await runQuery(`SELECT DISTINCT ${qid(STICHTAG_COL)} AS m FROM ${qid(tn)} WHERE ${qid(STICHTAG_COL)} IS NOT NULL ORDER BY 1`);
+    state.pksMonths[tn] = res.rows.map(r => String(r.m));
+  } catch (_) { state.pksMonths[tn] = []; }
+  return state.pksMonths[tn];
+}
+
+// Current [startIdx, endIdx] into `months`, read from the active tab's stichtag filter (full range if none).
+function pksStichtagSel(months, pv) {
+  const f = (pv.filters || []).find(x => x.col === STICHTAG_COL);
+  if (!f || !f.filter || f.filter.type !== 'values' || !f.filter.included) return [0, months.length - 1];
+  let lo = Infinity, hi = -Infinity;
+  for (const v of f.filter.included) { const i = months.indexOf(String(v)); if (i >= 0) { lo = Math.min(lo, i); hi = Math.max(hi, i); } }
+  return lo === Infinity ? [0, months.length - 1] : [lo, hi];
+}
+
+// Apply a stichtag window to EVERY PKS tab (so all tabs + the "export all" workbook share it), then
+// refresh. Selecting the full range removes the filter entirely (no needless WHERE clause).
+function applyPksStichtag(tn, months, a, b) {
+  const lo = Math.max(0, Math.min(a, b)), hi = Math.min(months.length - 1, Math.max(a, b));
+  const full = lo === 0 && hi === months.length - 1;
+  for (const pv of ensurePksList(tn)) {
+    pv.filters = (pv.filters || []).filter(x => x.col !== STICHTAG_COL);
+    if (!full) pv.filters.push({ col: STICHTAG_COL, filter: { type: 'values', included: new Set(months.slice(lo, hi + 1)) } });
+  }
+  state.pivotShape = null; refreshPivotView(); scheduleSave();
+}
+
+// Dual-handle slider + formatted label. Dragging updates the label/fill live; the query only re-runs
+// on release (change), so scrubbing stays smooth.
+function renderPksDateRange(tn, months, pv) {
+  const max = months.length - 1, [s0, e0] = pksStichtagSel(months, pv);
+  const label = el('span', { class:'pks-dr-label' });
+  const fill = el('div', { class:'pks-dr-fill' });
+  const startR = el('input', { type:'range', min:'0', max:String(max), step:'1', value:String(s0) });
+  const endR = el('input', { type:'range', min:'0', max:String(max), step:'1', value:String(e0) });
+  const paint = () => {
+    const a = +startR.value, b = +endR.value, lo = Math.min(a, b), hi = Math.max(a, b);
+    label.textContent = `${fmtStichtag(months[lo])} – ${fmtStichtag(months[hi])}`;
+    const pct = (i) => max ? (i / max) * 100 : 0;
+    fill.style.left = pct(lo) + '%'; fill.style.width = (pct(hi) - pct(lo)) + '%';
+  };
+  startR.oninput = () => { if (+startR.value > +endR.value) endR.value = startR.value; paint(); };
+  endR.oninput = () => { if (+endR.value < +startR.value) startR.value = endR.value; paint(); };
+  const commit = () => applyPksStichtag(tn, months, +startR.value, +endR.value);
+  startR.onchange = commit; endR.onchange = commit;
+  paint();
+  const sliderWrap = el('div', { class:'pks-dr-slider-wrap' }, el('div', { class:'pks-dr-track' }), fill, startR, endR);
+  return el('div', { class:'pks-daterange' },
+    el('span', { class:'pks-dr-text' }, el('span', { class:'pks-dr-cap' }, tt('stichtagRange')), label),
+    sliderWrap);
 }
 function switchTab(i) { const ctx = tabCtx(); ctx.setActive(i); state.pivotShape = null; refreshPivotView(); scheduleSave(); }
 function addTab() {
@@ -2073,6 +2159,7 @@ async function refreshPivotView() {
     }
     try { state.pksKpiData = state.mode === 'pks' ? await runPksKpiQuery(pv, tn, table) : null; }
     catch (kpiErr) { console.error('KPI query failed', kpiErr); state.pksKpiData = null; }   // KPI failure must not break the grid
+    if (state.mode === 'pks') await ensurePksMonths(tn, table);   // distinct stichtag months for the date slider (cached)
     renderContent();
     scheduleSave();
   } catch (e) { console.error(e); toast(tt('pivotFailed', e.message), true); }
