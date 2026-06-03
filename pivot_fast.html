@@ -216,13 +216,6 @@
   .pivot-toolbar .pv-hide-toggle .pv-hide-cb { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   .pivot-toolbar .pv-hide-toggle input[type=checkbox] { margin: 0; }
   .pivot-toolbar .pv-hide-toggle input.pv-hide-thresh { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); font-size: 11px; }
-  .pivot-toolbar .pks-fiber { display: inline-flex; align-items: center; gap: 0; }
-  .pivot-toolbar .pks-fiber .pks-fiber-lbl { font-size: 11px; color: var(--text-faint); margin-right: 6px; }
-  .pivot-toolbar .pks-fiber button.pks-fiber-seg { border-radius: 0; margin: 0; border-left-width: 0; }
-  .pivot-toolbar .pks-fiber button.pks-fiber-seg:first-of-type { border-radius: 3px 0 0 3px; border-left-width: 1px; }
-  .pivot-toolbar .pks-fiber button.pks-fiber-seg:last-of-type { border-radius: 0 3px 3px 0; }
-  .pivot-toolbar .pks-fiber button.pks-fiber-seg.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .pivot-toolbar .pks-fiber button.pks-fiber-seg.active:hover { background: var(--accent); filter: brightness(1.08); }
   /* Pivot grid */
   table.pgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
   table.pgrid thead { position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--pv-border); }
@@ -442,7 +435,7 @@ const I18N = {
     dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
-    resetPreset: 'Zurücksetzen', fiberLabel: 'Technik:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: „Ohne Fiber" = ≠ Fiber, „Nur Fiber" = = Fiber',
+    resetPreset: 'Zurücksetzen',
     pksAddHint: 'Weitere PKS-Auswertung mit eigenen Filtern hinzufügen', pksDelete: 'Diese Auswertung löschen', pksRenameHint: 'Doppelklick zum Umbenennen',
     splashTitle: 'Parquet Explorer', splashHint: 'Lege eine .parquet-Datei ab, um zu beginnen.',
     sort: 'Sortierung', noRows: 'Keine Zeilen.', filtered: '(gefiltert)',
@@ -490,6 +483,7 @@ const I18N = {
     restored: '{0} Tabelle(n) aus der letzten Sitzung wiederhergestellt',
     exportedExcel: 'Excel exportiert ({0}-Format)', excelLoading: 'Excel-Bibliothek lädt noch — gleich erneut versuchen', excelFailed: 'Excel-Export fehlgeschlagen: {0}',
     sheetFull: 'Pivot (voll)', sheetReduced: 'Pivot (reduziert)',
+    expAllPks: 'Alle PKS-Tabs (Excel)', pksSheetFull: 'voll', pksSheetFilt: 'gefiltert',
     buildPivotFirst: 'Erst eine Pivot-Tabelle erstellen', runQueryFirst: 'Erst eine Abfrage ausführen',
     exported: '{0} exportiert', exportFailed: 'Export fehlgeschlagen: {0}', loadFailed: 'Laden von {0} fehlgeschlagen: {1}',
     filterError: 'Filterfehler: {0}', queryError: 'Abfragefehler: {0}', pivotFailed: 'Pivot-Abfrage fehlgeschlagen: {0}',
@@ -503,7 +497,7 @@ const I18N = {
     dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
     table: 'Table', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
-    resetPreset: 'Reset', fiberLabel: 'Tech:', fiberOhne: 'Ohne Fiber', fiberNur: 'Nur Fiber', fiberTitle: 'td_bb_technik: "Ohne Fiber" = ≠ Fiber, "Nur Fiber" = = Fiber',
+    resetPreset: 'Reset',
     pksAddHint: 'Add another PKS report with its own filters', pksDelete: 'Delete this report', pksRenameHint: 'Double-click to rename',
     splashTitle: 'Parquet Explorer', splashHint: 'Drop a .parquet file to begin.',
     sort: 'Sort', noRows: 'No rows.', filtered: '(filtered)',
@@ -551,6 +545,7 @@ const I18N = {
     restored: 'Restored {0} table(s) from your last session',
     exportedExcel: 'Exported Excel ({0} formatting)', excelLoading: 'Excel library still loading — try again in a moment', excelFailed: 'Excel export failed: {0}',
     sheetFull: 'Pivot (full)', sheetReduced: 'Pivot (reduced)',
+    expAllPks: 'All PKS tabs (Excel)', pksSheetFull: 'full', pksSheetFilt: 'filtered',
     buildPivotFirst: 'Add fields to build a pivot first', runQueryFirst: 'Run a query first',
     exported: 'Exported {0}', exportFailed: 'Export failed: {0}', loadFailed: 'Failed to load {0}: {1}',
     filterError: 'Filter error: {0}', queryError: 'Query error: {0}', pivotFailed: 'Pivot query failed: {0}',
@@ -1002,8 +997,8 @@ function pksPresetConfig(table, opts = {}) {
   pv.rows = [{ col: 'phase_1_rkza_monat_bis' }, { col: 'adj_phase_1_bb_agb_brutto' }, { col: 'tsc_pks_highlight' }].filter(r => has(r.col));
   pv.cols = [{ col: 'neues_fiber_portfolio' }, { col: 'anschluss_bandbreite_cluster' }, { col: 'adj_bb_agb_preis_brutto' }].filter(r => has(r.col));
   pv.values = [{ col: 'sum_td_nettovertriebsleistung', agg: 'SUM' }].filter(v => has(v.col));
-  // Start with the "< X %" filter OFF so the report opens at a true 100% with every row visible.
-  pv.hideBelowPct = false;
+  // Open with the "< 0,01 %" long-tail filter ON by default (user can turn it off / change the value).
+  pv.hideBelowPct = true; pv.hideThresholdPct = 0.01;
   const notTrue = () => ({ type: 'text', op: 'eq', a: 'True', not: true, keepNull: true });   // != "True", NULLs kept
   const f = [];
   if (has('fn_planungshauptgruppe_pk')) f.push({ col: 'fn_planungshauptgruppe_pk', filter: { type: 'values', included: new Set(['ET', 'DP']) } });
@@ -1825,7 +1820,7 @@ function renderPivotToolbar() {
     el('button', { onclick: () => { pv.expanded = new Set(); pv.colExpanded = new Set(); rebuildPivotShape(); renderContent(); } }, tt('collapseAll')),
     el('button', { onclick: () => { const tn = state.activeTable; if (state.mode === 'pks') { const list = ensurePksList(tn), i = pksActiveIdx(tn), cur = list[i], spec = PKS_DEFAULT_TABS.find(s => s.name === cur.name) || {}; const fresh = pksPresetConfig(state.tables.find(t => t.name === tn), spec); fresh.name = cur.name; list[i] = fresh; } else state.pivot[tn] = newPivotState(); state.pivotShape = null; renderContent(); scheduleSave(); } }, state.mode === 'pks' ? tt('resetPreset') : tt('clear')),
     state.mode === 'pks'
-      ? renderPksFiberToggle(pv)
+      ? null
       : el('button', { class: 'preset-btn' + (presetOn ? ' preset-on' : ''), title: tt('presetFilterTitle'), 'aria-pressed': presetOn ? 'true' : 'false', onclick: () => togglePivotPreset() },
           el('span', { class:'btn-ico', html: presetOn ? ICONS.funnelFilled : ICONS.funnel }), tt('presetFilter')),
     el('span', { style:'border-left:1px solid var(--border); align-self:stretch; margin:0 2px;' }),
@@ -1835,63 +1830,50 @@ function renderPivotToolbar() {
       el('label', { class:'pv-hide-cb' },
         el('input', { type:'checkbox', checked: pv.hideBelowPct ? '' : null, onchange: (e) => { pv.hideBelowPct = e.target.checked; renderContent(); scheduleSave(); } }),
         el('span', null, tt('hideBelowPre'))),
-      el('input', { type:'number', class:'pv-hide-thresh', min:'0', step:'0.1', value: String(pv.hideThresholdPct ?? 1),
+      el('input', { type:'number', class:'pv-hide-thresh', min:'0', step:'0.01', value: String(pv.hideThresholdPct ?? 1),
         onchange: (e) => { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) v = 0; pv.hideThresholdPct = v; e.target.value = String(v); if (pv.hideBelowPct) renderContent(); scheduleSave(); } }),
       el('span', { class:'pv-hide-post' }, tt('hideBelowPost'))),
     el('span', { style:'margin-left:auto;' }, el('button', { onclick: () => openExportMenu('pivot') }, tt('export')))
   );
 }
 
-// PKS-only segmented control switching the td_bb_technik filter between != Fiber and == Fiber.
-function renderPksFiberToggle(pv) {
-  const table = state.tables.find(t => t.name === state.activeTable);
-  if (!table || !table.schema.some(c => c.name === 'td_bb_technik')) return null;
-  const mode = pksFiberMode(pv);
-  const seg = (key, label) => el('button', { class: 'pks-fiber-seg' + (mode === key ? ' active' : ''), onclick: () => setPksFiber(pv, key === 'only') }, label);
-  return el('div', { class: 'pks-fiber', title: tt('fiberTitle') }, el('span', { class:'pks-fiber-lbl' }, tt('fiberLabel')), seg('without', tt('fiberOhne')), seg('only', tt('fiberNur')));
-}
-function pksFiberMode(pv) {
-  const f = fieldForCol(pv, 'td_bb_technik'), fl = f && f.filter;
-  if (fl && fl.type === 'text' && fl.op === 'eq' && fl.a === 'Fiber') return fl.not ? 'without' : 'only';
-  return null;
-}
-function setPksFiber(pv, only) {
-  const existing = fieldForCol(pv, 'td_bb_technik');
-  if (existing) existing.filter = pksFiberFilter(only); else pv.filters.push({ col: 'td_bb_technik', filter: pksFiberFilter(only) });
-  refreshPivotView(); scheduleSave();
-}
-
-function expandAll(pv) {
+// Every node key in the trees (used to fully expand for the Excel export). Defaults to the active
+// shape; pass an explicit shape to expand a non-active pivot (e.g. exporting all PKS tabs).
+function expandAll(pv, sh = state.pivotShape) {
   const rs = new Set(), cs = new Set();
-  if (state.pivotShape) {
-    const wr = (n) => { rs.add(n.key); (n.children||[]).forEach(wr); }; state.pivotShape.rowTree.forEach(wr);
-    const wc = (n) => { cs.add(n.key); (n.children||[]).forEach(wc); }; state.pivotShape.colTree.forEach(wc);
+  if (sh) {
+    const wr = (n) => { rs.add(n.key); (n.children||[]).forEach(wr); }; sh.rowTree.forEach(wr);
+    const wc = (n) => { cs.add(n.key); (n.children||[]).forEach(wc); }; sh.colTree.forEach(wc);
   }
   return { rows: rs, cols: cs };
 }
 function renderPivotStatusBar() { const nloc = activeLocale().intl; return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? tt('rowGroups', state.pivotShape.leafRows.length.toLocaleString(nloc), state.pivotShape.leafCols.length.toLocaleString(nloc)) : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
 
-async function refreshPivotView() {
-  const tn = state.activeTable, pv = activePivot(), table = state.tables.find(t => t.name === tn);
-  if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) { state.pivotData = null; state.pivotShape = null; renderContent(); return; }
-  
+// Run one pivot's aggregation query and return its raw rows + dims (no state mutation).
+// Returns null when the pivot has no row/col dimension or no value field.
+async function runPivotQuery(pv, tn, table) {
+  if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) return null;
   const filterMap = {};
   for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
   const where = buildWhere(table, filterMap);
   const rowDims = pv.rows.map(r => r.col), colDims = pv.cols.map(c => c.col), allDims = [...rowDims, ...colDims];
-  
   const valExprs = pv.values.map((v, i) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid('v'+i)}`);
   const groupCols = allDims.map((col, i) => `GROUPING(${qid(col)}) AS ${qid('g_'+i)}`);
-  
   let groupClause;
   if (rowDims.length === 0) groupClause = colDims.length ? `GROUP BY ROLLUP(${colDims.map(qid).join(',')})` : '';
   else if (colDims.length === 0) groupClause = `GROUP BY ROLLUP(${rowDims.map(qid).join(',')})`;
   else groupClause = `GROUP BY ROLLUP(${rowDims.map(qid).join(',')}), ROLLUP(${colDims.map(qid).join(',')})`;
-  
+  const res = await runQuery(`SELECT ${[...allDims.map(qid), ...groupCols, ...valExprs].join(', ')} FROM ${qid(tn)} ${where} ${groupClause}`);
+  return { rows: res.rows, rowDims, colDims, valueDefs: pv.values };
+}
+
+async function refreshPivotView() {
+  const tn = state.activeTable, pv = activePivot(), table = state.tables.find(t => t.name === tn);
+  if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) { state.pivotData = null; state.pivotShape = null; renderContent(); return; }
   try {
-    const res = await runQuery(`SELECT ${[...allDims.map(qid), ...groupCols, ...valExprs].join(', ')} FROM ${qid(tn)} ${where} ${groupClause}`);
-    state.pivotData = res.rows; state.pivotShape = buildPivotShape(rowDims, colDims, pv.values, res.rows, pv);
-    const sig = rowDims.join('|') + '||' + colDims.join('|');
+    const q = await runPivotQuery(pv, tn, table);
+    state.pivotData = q.rows; state.pivotShape = buildPivotShape(q.rowDims, q.colDims, pv.values, q.rows, pv);
+    const sig = q.rowDims.join('|') + '||' + q.colDims.join('|');
     if (pv._dimSig !== sig && state.pivotShape) { const e = expandAll(pv); pv.expanded = e.rows; pv.colExpanded = e.cols; pv._dimSig = sig; }
     renderContent();
     scheduleSave();
@@ -2273,9 +2255,11 @@ function openExportMenu(source) {
   _activePopupClose = close;
   const locLabel = (LOCALES[state.settings.locale] || LOCALES.de).intl === 'de-DE' ? 'DE' : 'US';
   const item = (label, fn, extra) => el('div', { class:'ctx-menu-item row', onclick: () => { close(); fn(); } }, el('span', null, label), extra || null);
+  const isPks = source === 'pivot' && state.mode === 'pks';
   const menu = el('div', { class:'ctx-menu', style:'right:16px; bottom:40px; min-width:200px;' },
     el('div', { class:'ctx-menu-h' }, tt('expSpreadsheet')),
     item('Excel (.xlsx)', () => exportXlsx(source), el('span', { class:'badge-sm' }, locLabel)),
+    isPks ? item(tt('expAllPks'), () => exportPksAllTabs(), el('span', { class:'badge-sm' }, locLabel)) : null,
     el('div', { class:'ctx-menu-sep' }),
     el('div', { class:'ctx-menu-h' }, tt('expData')),
     item('CSV', () => doExport(source, 'csv')),
@@ -2299,6 +2283,12 @@ const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } 
 const thin = (argb = 'FFE2E8F0') => ({ style: 'thin', color: { argb } });
 const allBorders = (argb) => ({ top: thin(argb), left: thin(argb), bottom: thin(argb), right: thin(argb) });
 const sanitizeSheet = (n) => (n || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31) || 'Sheet1';
+// Sanitised AND unique within the workbook (Excel rejects duplicate sheet names).
+function safeSheetName(wb, raw) {
+  let base = sanitizeSheet(raw), n = base, i = 2;
+  while (wb.worksheets.some(w => w.name === n)) { const suf = ' ' + i++; n = base.slice(0, 31 - suf.length) + suf; }
+  return n;
+}
 
 function xlsxCellValue(v, kind) {
   if (v === null || v === undefined) return null;
@@ -2339,11 +2329,15 @@ function buildTableSheet(wb, name, rows, columns) {
 // native Excel row/column outline groups, mirroring the web pivot's drill-down.
 function buildPivotSheet(wb, opts = {}) {
   const reduced = !!opts.reduced;
-  const sh0 = state.pivotShape, pv = activePivot();
+  // Default to the active pivot/shape/data; opts may supply a specific pivot (e.g. export all PKS tabs).
+  const pv = opts.pv || activePivot();
+  const rowDims = opts.rowDims || state.pivotShape.rowDims, colDims = opts.colDims || state.pivotShape.colDims;
+  const valueDefs = opts.valueDefs || state.pivotShape.valueDefs, data = opts.data || state.pivotData;
+  const baseSh = opts.pv ? buildPivotShape(rowDims, colDims, valueDefs, data, pv) : state.pivotShape;  // full trees for expandAll
   const effSub = pv.subtotals === 'off' ? 'top' : pv.subtotals;   // grouping needs summary rows to collapse into
-  const allExp = expandAll(pv);                                   // every node key from the (full) trees
+  const allExp = expandAll(pv, baseSh);                           // every node key from the (full) trees
   const fullPv = { ...pv, subtotals: effSub, expanded: allExp.rows, colExpanded: allExp.cols };
-  const sh = buildPivotShape(sh0.rowDims, sh0.colDims, sh0.valueDefs, state.pivotData, fullPv);
+  const sh = buildPivotShape(rowDims, colDims, valueDefs, data, fullPv);
 
   const nValues = sh.valueDefs.length, D = sh.colDims.length, hasColDims = D > 0;
   const cellMap = sh.cellMap;
@@ -2357,7 +2351,7 @@ function buildPivotSheet(wb, opts = {}) {
   const gtColStart = firstDataCol + leafCols.length * nValues;
   const valLabel = (vd) => `${vd.agg.replace('_', ' ')}(${vd.col})`;
 
-  const ws = wb.addWorksheet(reduced ? tt('sheetReduced') : tt('sheetFull'));
+  const ws = wb.addWorksheet(safeSheetName(wb, opts.sheetName || (reduced ? tt('sheetReduced') : tt('sheetFull'))));
 
   const styleHeader = (cell, depth, bold = true) => {
     cell.fill = solid(xlsxHdrBg(depth)); cell.font = { bold, color: { argb: 'FFFFFFFF' }, size: 11 };
@@ -2486,6 +2480,31 @@ async function exportXlsx(source) {
     const buf = await wb.xlsx.writeBuffer();
     const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     const a = document.createElement('a'); a.href = url; a.download = `${fileBase}_${Date.now()}.xlsx`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(tt('exportedExcel', activeLocale().intl));
+  } catch (e) { console.error(e); toast(tt('excelFailed', e.message), true); }
+}
+
+// Export EVERY PKS report for the active table into one workbook: two sheets per tab (full + filtered).
+async function exportPksAllTabs() {
+  if (typeof ExcelJS === 'undefined') { toast(tt('excelLoading'), true); return; }
+  const tn = state.activeTable, table = state.tables.find(t => t.name === tn);
+  if (!tn || !table) return;
+  try {
+    const list = ensurePksList(tn), wb = new ExcelJS.Workbook(); wb.creator = 'Parquet Explorer';
+    let any = false;
+    for (let i = 0; i < list.length; i++) {
+      const pv = list[i], name = pv.name || ('PKS ' + (i + 1));
+      const q = await runPivotQuery(pv, tn, table);
+      if (!q) continue;
+      buildPivotSheet(wb, { reduced: false, pv, ...q, sheetName: `${name} (${tt('pksSheetFull')})` });
+      buildPivotSheet(wb, { reduced: true,  pv, ...q, sheetName: `${name} (${tt('pksSheetFilt')})` });
+      any = true;
+    }
+    if (!any) { toast(tt('buildPivotFirst'), true); return; }
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = `${tn}_pks_all_${Date.now()}.xlsx`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast(tt('exportedExcel', activeLocale().intl));
   } catch (e) { console.error(e); toast(tt('excelFailed', e.message), true); }
