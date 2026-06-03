@@ -1181,6 +1181,17 @@ function renderContent() {
   else if (state.mode === 'sql') root.appendChild(renderSQLMode());
 }
 
+// renderContent() rebuilds #content from scratch, so the pivot scroll container is recreated at the
+// top — jarring when a click only toggles something in-place (e.g. expanding a KPI row). This captures
+// the pivot grid's scroll offsets and restores them onto the freshly rendered container.
+function rerenderPivotKeepingScroll() {
+  const old = document.getElementById('pivot-grid-scroll');
+  const top = old ? old.scrollTop : 0, left = old ? old.scrollLeft : 0;
+  renderContent();
+  const next = document.getElementById('pivot-grid-scroll');
+  if (next) { next.scrollTop = top; next.scrollLeft = left; }
+}
+
 function switchMode(m) {
   state.mode = m;
   const sidebar = $('#sidebar'), toggleBtn = $('#sidebar-toggle');
@@ -2248,7 +2259,7 @@ function renderPivotGrid() {
       const groupKey = '__root|' + safeJoin(col.vals.slice(0, lvl + 1)), node = getColNode(sh.colTree, groupKey);
       if (node && node.children.length > 0) {
         const isExp = pv.colExpanded.has(groupKey);
-        th.appendChild(el('span', { class:'chev', style:'margin-right:4px; color:#fff;', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.colExpanded.delete(groupKey); else pv.colExpanded.add(groupKey); rebuildPivotShape(); renderContent(); } }));
+        th.appendChild(el('span', { class:'chev', style:'margin-right:4px; color:#fff;', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.colExpanded.delete(groupKey); else pv.colExpanded.add(groupKey); rebuildPivotShape(); rerenderPivotKeepingScroll(); } }));
       }
       const label = col.vals[lvl] !== undefined ? String(col.vals[lvl]) : '';
       th.appendChild(document.createTextNode(label === 'null' || label === 'undefined' ? '∅' : label));
@@ -2289,7 +2300,7 @@ function renderPivotGrid() {
     const tr = el('tr', { class: rowClass });
     if (!isGrand && node.children.length > 0) {
       const isExp = pv.expanded.has(node.key);
-      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.expanded.delete(node.key); else pv.expanded.add(node.key); rebuildPivotShape(); renderContent(); } }));
+      labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight, onclick: () => { if (isExp) pv.expanded.delete(node.key); else pv.expanded.add(node.key); rebuildPivotShape(); rerenderPivotKeepingScroll(); } }));
       labelTd.appendChild(document.createTextNode(' ' + labelStr));
     } else labelTd.textContent = labelStr;
     tr.appendChild(labelTd);
@@ -2363,7 +2374,7 @@ function appendPksKpiRows(tbody, visLeafCols, hasColDims, nValues, showAs) {
     if (kpi.collapsible) {
       const isExp = expanded.has(kpi.id);
       labelTd.appendChild(el('span', { class:'chev', style:'color:var(--pv-h1);', html: isExp ? ICONS.chevDown : ICONS.chevRight,
-        onclick: () => { if (isExp) expanded.delete(kpi.id); else expanded.add(kpi.id); renderContent(); } }));
+        onclick: () => { if (isExp) expanded.delete(kpi.id); else expanded.add(kpi.id); rerenderPivotKeepingScroll(); } }));
       labelTd.appendChild(document.createTextNode(' ' + kpi.label));
     } else labelTd.textContent = kpi.label;
     tr.appendChild(labelTd);
