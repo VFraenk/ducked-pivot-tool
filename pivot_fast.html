@@ -2468,7 +2468,6 @@ function buildPivotSheet(wb, opts = {}) {
     if (!isGrand) {                                                          // open collapsed past level 2
       row.outlineLevel = Math.min(Math.max(depth, 0), 7);
       if (depth >= XLSX_DEFAULT_LEVELS) row.hidden = true;
-      else if (isSub && depth === XLSX_DEFAULT_LEVELS - 1) row.collapsed = true;   // summary whose detail is hidden
     }
 
     const rKey = isGrand ? '' : safeJoin(node.vals);
@@ -2504,7 +2503,6 @@ function buildPivotSheet(wb, opts = {}) {
       for (let vi = 0; vi < nValues; vi++) {                                  // open collapsed past level 2
         const c = ws.getColumn(leafColStart(i) + vi); c.outlineLevel = Math.min(lvl, 7);
         if (lvl >= XLSX_DEFAULT_LEVELS) c.hidden = true;
-        else if (lc.isColSubtotal && lc.depth === XLSX_DEFAULT_LEVELS - 1) c.collapsed = true;   // summary whose detail is hidden
       }
     }
     for (let vi = 0; vi < nValues; vi++) ws.getColumn(gtColStart + vi).outlineLevel = 0;
