@@ -30,6 +30,8 @@
     --header-bg: #f3f3f5;
     --pill-bg: #eaf2ff;
     --pill-border: #b6cdf6;
+    --font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --grid-radius: 0px;     /* default theme keeps square grids; the Telekom theme rounds them */
     /* Pivot blue palette — darkest at outermost level, fades inward */
     --pv-h0: #2e5fa3;      /* outermost col level header */
     --pv-h1: #4a7abf;      /* second level */
@@ -44,9 +46,12 @@
     --pv-sub-both: #c8d8ee;  /* row-subtotal × col-subtotal cell */
     --pv-grp-label: #c2d4ec; /* top-level group label */
   }
-  /* Telekom (Deutsche Telekom) magenta theme — selectable from Settings */
+  /* Telekom (Deutsche Telekom) magenta theme — modelled on the ODS / DT "Table" design */
   :root[data-theme="telekom"] {
-    --accent: #e22074;
+    /* TeleNeo is Telekom's brand typeface; Arial is its official web fallback when TeleNeo isn't installed */
+    --font-base: "TeleNeo", "TeleNeoWeb", Arial, "Helvetica Neue", Helvetica, sans-serif;
+    --grid-radius: 8px;
+    --accent: #e20074;      /* canonical Telekom magenta */
     --accent-bg: #fde6f1;
     --pill-bg: #fde6f1;
     --pill-border: #f3a6cf;
@@ -64,7 +69,15 @@
     --pv-sub-both: #f1c2dd;
     --pv-grp-label: #ecbcd8;
   }
-  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
+  /* ODS / DT "Table" design accents — applied when the Telekom theme is active */
+  :root[data-theme="telekom"] .grid-scroll { border: 1px solid var(--border); border-radius: var(--grid-radius); }
+  :root[data-theme="telekom"] .topbar .title { color: var(--accent); }
+  :root[data-theme="telekom"] button:focus-visible,
+  :root[data-theme="telekom"] input:focus-visible,
+  :root[data-theme="telekom"] select:focus-visible,
+  :root[data-theme="telekom"] textarea:focus-visible,
+  :root[data-theme="telekom"] [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+  html, body { height: 100%; margin: 0; font-family: var(--font-base); font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
   body { overflow: hidden; }
   *, *::before, *::after { box-sizing: border-box; }
   button { font: inherit; }
@@ -427,7 +440,7 @@ const state = {
   pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null, pksKpiExpanded: new Set(), pksMonths: {},
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
-  settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
+  settings: { lang: 'de', locale: 'de', theme: 'telekom', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
 };
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
@@ -483,7 +496,7 @@ const I18N = {
     showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
     sortRows: 'Zeilen:', sortCols: 'Spalten:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Wert ↓', sortValAsc: 'Wert ↑',
     rowLevel: 'Zeilen-Ebene:', colLevel: 'Spalten-Ebene:', levelAll: 'Alle',
-    theme: 'Design', themeDefault: 'Standard (Blau)', themeTelekom: 'Telekom (Magenta)',
+    theme: 'Design', themeDefault: 'Klassisch (Blau)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
@@ -547,7 +560,7 @@ const I18N = {
     showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
     sortRows: 'Rows:', sortCols: 'Cols:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Value ↓', sortValAsc: 'Value ↑',
     rowLevel: 'Row levels:', colLevel: 'Col levels:', levelAll: 'All',
-    theme: 'Theme', themeDefault: 'Default (Blue)', themeTelekom: 'Telekom (Magenta)',
+    theme: 'Theme', themeDefault: 'Classic (Blue)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
