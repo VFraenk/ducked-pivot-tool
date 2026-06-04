@@ -30,6 +30,8 @@
     --header-bg: #f3f3f5;
     --pill-bg: #eaf2ff;
     --pill-border: #b6cdf6;
+    --font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --grid-radius: 0px;     /* default theme keeps square grids; the Telekom theme rounds them */
     /* Pivot blue palette — darkest at outermost level, fades inward */
     --pv-h0: #2e5fa3;      /* outermost col level header */
     --pv-h1: #4a7abf;      /* second level */
@@ -44,9 +46,12 @@
     --pv-sub-both: #c8d8ee;  /* row-subtotal × col-subtotal cell */
     --pv-grp-label: #c2d4ec; /* top-level group label */
   }
-  /* Telekom (Deutsche Telekom) magenta theme — selectable from Settings */
+  /* Telekom (Deutsche Telekom) magenta theme — modelled on the ODS / DT "Table" design */
   :root[data-theme="telekom"] {
-    --accent: #e22074;
+    /* TeleNeo is Telekom's brand typeface; Arial is its official web fallback when TeleNeo isn't installed */
+    --font-base: "TeleNeo", "TeleNeoWeb", Arial, "Helvetica Neue", Helvetica, sans-serif;
+    --grid-radius: 8px;
+    --accent: #e20074;      /* canonical Telekom magenta */
     --accent-bg: #fde6f1;
     --pill-bg: #fde6f1;
     --pill-border: #f3a6cf;
@@ -64,7 +69,15 @@
     --pv-sub-both: #f1c2dd;
     --pv-grp-label: #ecbcd8;
   }
-  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
+  /* ODS / DT "Table" design accents — applied when the Telekom theme is active */
+  :root[data-theme="telekom"] .grid-scroll { border: 1px solid var(--border); border-radius: var(--grid-radius); }
+  :root[data-theme="telekom"] .topbar .title { color: var(--accent); }
+  :root[data-theme="telekom"] button:focus-visible,
+  :root[data-theme="telekom"] input:focus-visible,
+  :root[data-theme="telekom"] select:focus-visible,
+  :root[data-theme="telekom"] textarea:focus-visible,
+  :root[data-theme="telekom"] [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+  html, body { height: 100%; margin: 0; font-family: var(--font-base); font-size: 13px; color: var(--text); background: var(--bg); overflow: hidden; }
   body { overflow: hidden; }
   *, *::before, *::after { box-sizing: border-box; }
   button { font: inherit; }
@@ -322,7 +335,6 @@
   .chev { cursor: pointer; display: inline-flex; align-items: center; width: 14px; color: var(--text-dim); }
   .chev .icon { width: 12px; height: 12px; }
   .chev:hover { color: var(--text); }
-  .pivot-chip .menu-btn .icon { width: 12px; height: 12px; }
   table.dgrid th .funnel-btn .icon { width: 12px; height: 12px; }
   .splash { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; flex: 1; padding: 32px; color: var(--text-dim); }
   .splash .big-dropzone { width: 100%; max-width: 480px; padding: 48px 24px; font-size: 14px; }
@@ -330,8 +342,6 @@
   .ctx-menu-item { padding: 5px 12px; cursor: pointer; }
   .ctx-menu-item:hover { background: var(--accent-bg); }
   .ctx-menu-sep { border-top: 1px solid var(--border); margin: 4px 0; }
-  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--bg-alt2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .agg-select { padding: 1px 2px; font-size: 10px; border: 1px solid var(--pill-border); border-radius: 2px; background: var(--bg); }
   .toast { position: fixed; bottom: 32px; right: 16px; background: var(--text); color: white; padding: 10px 16px; border-radius: 4px; font-size: 12px; z-index: 300; opacity: 0; transition: opacity 200ms; pointer-events: none; max-width: 400px; }
   .toast.show { opacity: 1; }
@@ -430,7 +440,7 @@ const state = {
   pivot: {}, pivotActive: {}, pksPivot: {}, pksActive: {}, pivotData: null, pivotShape: null, pksKpiData: null, pksKpiExpanded: new Set(), pksMonths: {},
   sqlText: '-- Tables loaded above can be queried by name.\n-- Ctrl/Cmd+Enter to run.\nSELECT 1 AS hello;',
   sqlResult: null, sqlError: null, fdlg: null, distinctCache: new Map(),
-  settings: { lang: 'de', locale: 'de', theme: 'default', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
+  settings: { lang: 'de', locale: 'de', theme: 'telekom', rememberFiles: true, sidebarWidth: 240, pivotFieldsWidth: 320 },
 };
 
 const VALUE_AGGREGATIONS = ['SUM','AVG','COUNT','COUNT_DISTINCT','MIN','MAX','MEDIAN'];
@@ -453,7 +463,7 @@ const I18N = {
   de: {
     langName: 'Deutsch',
     initializing: 'wird initialisiert…', ready: 'DuckDB bereit', failed: 'DuckDB FEHLER', restoring: 'wird wiederhergestellt…',
-    dropParquet: '.parquet ablegen oder klicken', dropHint: '.parquet-Datei zum Laden ablegen', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
+    dropParquet: '.parquet ablegen oder klicken', dropBrowse: '.parquet-Datei ablegen oder zum Auswählen klicken',
     noTables: 'Keine Tabellen geladen', schema: 'Schema', settings: 'Einstellungen', session: 'Sitzung',
     table: 'Tabelle', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
     resetPreset: 'Zurücksetzen',
@@ -480,13 +490,13 @@ const I18N = {
     tileFilters: 'Filter', tileColumns: 'Spalten', tileRows: 'Zeilen', tileValues: 'Σ Werte',
     subtotals: 'Zwischensummen:', stTop: 'oben', stBottom: 'unten', stOff: 'aus',
     showColSub: 'Spaltensumme anzeigen', showColSubHint: 'Zwischensumme dieses Spaltenfelds ein-/ausblenden (z. B. die Summe je neues_fiber_portfolio)',
-    expandAll: 'Alle aufklappen', collapseAll: 'Alle zuklappen', clear: 'Leeren',
+    clear: 'Leeren',
     presetFilter: 'PKS Filter', presetFilterTitle: 'PKS Filter setzen: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS Filter gesetzt ({0} Felder)', presetCleared: 'PKS Filter entfernt', presetNoCols: 'Keine passenden Spalten für den PKS Filter gefunden',
     showAs: 'Werte anzeigen als:', saAbs: 'Absolut', saPctRow: '% der Zeile', saPctCol: '% der Spalte', saPctGrand: '% Gesamt',
     sortRows: 'Zeilen:', sortCols: 'Spalten:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Wert ↓', sortValAsc: 'Wert ↑',
     rowLevel: 'Zeilen-Ebene:', colLevel: 'Spalten-Ebene:', levelAll: 'Alle',
-    theme: 'Design', themeDefault: 'Standard (Blau)', themeTelekom: 'Telekom (Magenta)',
+    theme: 'Design', themeDefault: 'Klassisch (Blau)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
@@ -499,7 +509,7 @@ const I18N = {
     autosaveOn: 'Auto-Speichern', autosaveOff: 'Nicht gespeichert', saved: 'Gespeichert',
     autosaveOnTip: 'Ansicht & Dateien werden automatisch im Browser gespeichert', autosaveOffTip: 'Speichern ist deaktiviert — Klicken zum Aktivieren',
     saveFailedShort: 'Speichern fehlgeschlagen', saveFailed: 'Speichern fehlgeschlagen: {0}', saveQuota: 'Speichern fehlgeschlagen: Browser-Speicher voll. Tipp: manuelle Sortierreihenfolge von Elementen mit sehr vielen Werten zurücksetzen oder „Dateien merken" deaktivieren.', saveTrimmed: 'Speicher fast voll — manuelle Sortierreihenfolge wurde nicht mitgespeichert.',
-    sessionStatus: 'Status', statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
+    statusOn: 'Auto-Speichern aktiv', statusOff: 'Auto-Speichern aus', lastSaved: 'Zuletzt: {0}', neverSaved: 'noch nicht gespeichert',
     confirmClear: 'Alle gespeicherten Ansichten und Dateien löschen? Geladene Tabellen bleiben in dieser Sitzung erhalten.',
     removeTable: 'Tabelle entfernen', confirmRemoveTable: 'Tabelle „{0}" entfernen? Die geladene Datei wird verworfen.',
     rememberOn: 'Dateien werden in diesem Browser gespeichert', rememberOff: 'Gespeicherte Dateien gelöscht', clearedData: 'Gespeicherte Daten gelöscht',
@@ -517,7 +527,7 @@ const I18N = {
   en: {
     langName: 'English',
     initializing: 'initializing…', ready: 'duckdb ready', failed: 'duckdb FAILED', restoring: 'restoring…',
-    dropParquet: 'Drop .parquet or click', dropHint: 'Drop a .parquet file to begin.', dropBrowse: 'Drop .parquet here or click to pick',
+    dropParquet: 'Drop .parquet or click', dropBrowse: 'Drop .parquet here or click to pick',
     noTables: 'No tables loaded', schema: 'Schema', settings: 'Settings', session: 'Session',
     table: 'Table', pivot: 'Pivot', pks: 'PKS', sql: 'SQL',
     resetPreset: 'Reset',
@@ -544,13 +554,13 @@ const I18N = {
     tileFilters: 'Filters', tileColumns: 'Columns', tileRows: 'Rows', tileValues: 'Σ Values',
     subtotals: 'Subtotals:', stTop: 'top', stBottom: 'bottom', stOff: 'off',
     showColSub: 'Show column subtotal', showColSubHint: 'Show/hide the subtotal column for this column field (e.g. the total per neues_fiber_portfolio)',
-    expandAll: 'Expand All', collapseAll: 'Collapse All', clear: 'Clear',
+    clear: 'Clear',
     presetFilter: 'PKS Filter', presetFilterTitle: 'Apply PKS filter: funk_kenner ≠ True, regio_kenner ≠ True, fn_planungshauptgruppe_pk ∈ {DP, ET}',
     presetApplied: 'PKS filter applied ({0} fields)', presetCleared: 'PKS filter cleared', presetNoCols: 'No matching columns for the PKS filter',
     showAs: 'Show values as:', saAbs: 'Absolute', saPctRow: '% of row', saPctCol: '% of column', saPctGrand: '% of grand total',
     sortRows: 'Rows:', sortCols: 'Cols:', sortLabelAsc: 'A→Z', sortLabelDesc: 'Z→A', sortValDesc: 'Value ↓', sortValAsc: 'Value ↑',
     rowLevel: 'Row levels:', colLevel: 'Col levels:', levelAll: 'All',
-    theme: 'Theme', themeDefault: 'Default (Blue)', themeTelekom: 'Telekom (Magenta)',
+    theme: 'Theme', themeDefault: 'Classic (Blue)', themeTelekom: 'Telekom (Magenta)',
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
@@ -563,7 +573,7 @@ const I18N = {
     autosaveOn: 'Auto-save', autosaveOff: 'Not saved', saved: 'Saved',
     autosaveOnTip: 'View & files are saved automatically in this browser', autosaveOffTip: 'Saving is off — click to turn on',
     saveFailedShort: 'Save failed', saveFailed: 'Save failed: {0}', saveQuota: 'Save failed: browser storage is full. Tip: reset manual member ordering on very high-cardinality fields, or turn off "Remember files".', saveTrimmed: 'Storage nearly full — manual member ordering was not saved.',
-    sessionStatus: 'Status', statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
+    statusOn: 'Auto-save is on', statusOff: 'Auto-save is off', lastSaved: 'Last: {0}', neverSaved: 'not saved yet',
     confirmClear: 'Forget all saved view settings and stored files? Loaded tables stay in this session.',
     removeTable: 'Remove table', confirmRemoveTable: 'Remove table "{0}"? The loaded file will be discarded.',
     rememberOn: 'Files will be remembered in this browser', rememberOff: 'Stored files cleared', clearedData: 'Saved data cleared',
@@ -1352,8 +1362,7 @@ function fdlgMeasureCol() {
 function fdlgFilterContext() {
   const fdlg = state.fdlg, tn = state.activeTable, colName = fdlg.col.name, other = {};
   if (fdlg.isPivotFilter) {
-    const pv = activePivot();
-    for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter && f.col !== colName) other[f.col] = f.filter;
+    Object.assign(other, pivotFilterMap(activePivot(), colName));
   } else {
     const fm = state.filters[tn] || {};
     for (const [c, f] of Object.entries(fm)) if (c !== colName && f) other[c] = f;
@@ -1494,6 +1503,8 @@ function renderFilterDialog(anchor) {
 
 function renderValuesList(container) {
   const fdlg = state.fdlg;
+  // "Select all" is stored as selected === null; materialise it into a real Set before toggling items.
+  const materializeSel = () => { if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value)); };
   // Preserve scroll position of the inner list so checkbox clicks don't jump to top
   const savedScroll = container.querySelector('.vlist')?.scrollTop ?? 0;
   container.innerHTML = '';
@@ -1536,7 +1547,7 @@ function renderValuesList(container) {
         if (isSearching) {
           // Toggle only the visible (search-matching) items
           fdlg.selectAll = false;
-          if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+          materializeSel();
           for (const it of items) { if (e.target.checked) fdlg.selected.add(it.value); else fdlg.selected.delete(it.value); }
         } else {
           fdlg.selectAll = e.target.checked;
@@ -1558,7 +1569,7 @@ function renderValuesList(container) {
       title: 'Merge the checked search results into the filter, then clear the search so you can add more',
       onclick: () => {
         // Ensure we have an explicit selected Set (not the implicit "all" null)
-        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        materializeSel();
         // Union in every visible item that is currently checked
         for (const it of items) {
           if (fdlg.selectAll || fdlg.selected.has(it.value)) fdlg.selected.add(it.value);
@@ -1583,7 +1594,7 @@ function renderValuesList(container) {
     const row = el('label', { class:'vlist-item' },
       el('input', { type:'checkbox', checked: checked ? '' : null, onchange: (e) => {
         fdlg.selectAll = false;
-        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        materializeSel();
         if (e.target.checked) fdlg.selected.add(it.value); else fdlg.selected.delete(it.value);
         renderValuesList(container);
       }}),
@@ -1608,7 +1619,7 @@ function renderValuesList(container) {
       el('input', { type:'checkbox', checked: fdlg.includeBlank ? '' : null, onchange: (e) => {
         fdlg.includeBlank = e.target.checked;
         fdlg.selectAll = false;
-        if (fdlg.selected === null) fdlg.selected = new Set(fdlg.values.map(v => v.value));
+        materializeSel();
         renderValuesList(container);
       }}),
       el('span', { class:'val null' }, tt('blanksNull')),
@@ -2032,15 +2043,25 @@ function axisCurrentLevel(axis, pv) {
 }
 function renderPivotStatusBar() { const nloc = activeLocale().intl; return el('div', { class: 'statusbar' }, el('span', null, state.pivotShape ? tt('rowGroups', state.pivotShape.leafRows.length.toLocaleString(nloc), state.pivotShape.leafCols.length.toLocaleString(nloc)) : ''), el('span', { style:'margin-left:auto;' }, `${state.lastQueryMs.toFixed(0)} ms`)); }
 
+// Active filter map for a pivot: field filters from every shelf (filters/rows/cols/values), keyed by
+// column. exceptCol omits one column (used when computing a filter dialog's own available options).
+function pivotFilterMap(pv, exceptCol) {
+  const map = {};
+  for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter && f.col !== exceptCol) map[f.col] = f.filter;
+  return map;
+}
+// SQL aggregate expression for one value field (no alias): COUNT / COUNT(DISTINCT) / <agg>(col).
+function aggSql(v) {
+  return v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`;
+}
+
 // Run one pivot's aggregation query and return its raw rows + dims (no state mutation).
 // Returns null when the pivot has no row/col dimension or no value field.
 async function runPivotQuery(pv, tn, table) {
   if ((pv.rows.length === 0 && pv.cols.length === 0) || pv.values.length === 0) return null;
-  const filterMap = {};
-  for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
-  const where = buildWhere(table, filterMap);
+  const where = buildWhere(table, pivotFilterMap(pv));
   const rowDims = pv.rows.map(r => r.col), colDims = pv.cols.map(c => c.col), allDims = [...rowDims, ...colDims];
-  const valExprs = pv.values.map((v, i) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid('v'+i)}`);
+  const valExprs = pv.values.map((v, i) => `${aggSql(v)} AS ${qid('v'+i)}`);
   const groupCols = allDims.map((col, i) => `GROUPING(${qid(col)}) AS ${qid('g_'+i)}`);
   let groupClause;
   if (rowDims.length === 0) groupClause = colDims.length ? `GROUP BY ROLLUP(${colDims.map(qid).join(',')})` : '';
@@ -2079,9 +2100,7 @@ async function runPksKpiQuery(pv, tn, table) {
     sel.push(`${cond(`${internQ} AND ${youngQ}`)} AS "intern_y"`, `${cond(`${internQ} AND ${nonYoungQ}`)} AS "intern_n"`);
     sel.push(`${cond(`${externQ} AND ${youngQ}`)} AS "extern_y"`, `${cond(`${externQ} AND ${nonYoungQ}`)} AS "extern_n"`);
   }
-  const filterMap = {};
-  for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
-  const where = buildWhere(table, filterMap);
+  const where = buildWhere(table, pivotFilterMap(pv));
   // Group by the SAME row × column rollups as the main grid, so each conditional sum is keyed by
   // "rowKey#cKey" (cellMap convention). This lets the KPI block net out pruned row branches exactly
   // like the grid totals when "< X%" is on — otherwise the KPIs would ignore pruning entirely.
@@ -2882,9 +2901,9 @@ async function doExport(source, format) {
       sql = `SELECT ${table.schema.filter(c => !state.hidden[tn].has(c.name)).map(c => qid(c.name)).join(', ')} FROM ${qid(tn)} ${buildWhere(table, filters)} ${sort ? `ORDER BY ${qid(sort.col)} ${sort.dir}` : ''}`;
     } else if (source === 'sql') { sql = sqlEditor ? sqlEditor.getValue() : state.sqlText; }
     else if (source === 'pivot') {
-      const pv = activePivot(), filterMap = {}; for (const f of [...pv.filters, ...pv.rows, ...pv.cols, ...pv.values]) if (f.filter) filterMap[f.col] = f.filter;
+      const pv = activePivot(), filterMap = pivotFilterMap(pv);
       const allDims = [...pv.rows.map(r => r.col), ...pv.cols.map(c => c.col)];
-      const valExprs = pv.values.map((v) => `${v.agg === 'COUNT_DISTINCT' ? `COUNT(DISTINCT ${qid(v.col)})` : (v.agg === 'COUNT' ? `COUNT(${qid(v.col)})` : `${v.agg}(${qid(v.col)})`)} AS ${qid(v.col + '_' + v.agg)}`);
+      const valExprs = pv.values.map((v) => `${aggSql(v)} AS ${qid(v.col + '_' + v.agg)}`);
       sql = `SELECT ${[...allDims.map(qid), ...valExprs].join(', ')} FROM ${qid(tn)} ${buildWhere(table, filterMap)} ${allDims.length ? `GROUP BY ${allDims.map(qid).join(',')}` : ''}`;
     }
     const outName = `export_${Date.now()}.${format}`, copySQL = format === 'csv' ? `COPY (${sql}) TO '${outName}' (FORMAT CSV, HEADER true)` : format === 'json' ? `COPY (${sql}) TO '${outName}' (FORMAT JSON, ARRAY true)` : `COPY (${sql}) TO '${outName}' (FORMAT PARQUET)`;
