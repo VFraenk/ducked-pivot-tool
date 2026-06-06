@@ -2200,7 +2200,9 @@ function buildPivotShape(rowDims, colDims, valueDefs, rows, pv) {
 
     const rVals = rowDims.map(d => r[d]), cVals = colDims.map(d => r[d]);
     const rKey = safeJoin(rVals.slice(0, rDepth)), cKey = safeJoin(cVals.slice(0, cDepth));
-    cellMap.set(rKey + '#' + cKey, valueDefs.map((_, i) => r['v'+i]));
+    // Coerce to a plain number: DuckDB-wasm hands back SUM over DECIMAL/HUGEINT columns as a string or
+    // BigInt, which ExcelJS would otherwise write as quoted text ("94883") and the grid wouldn't format.
+    cellMap.set(rKey + '#' + cKey, valueDefs.map((_, i) => { const x = r['v'+i]; if (x === null || x === undefined) return null; const n = Number(x); return Number.isFinite(n) ? n : x; }));
 
     if (rDepth === rowDims.length && cDepth === colDims.length) {
       let node = rowTreeRoot;
