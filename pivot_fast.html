@@ -500,7 +500,7 @@ const I18N = {
     hideBelowPre: '<', hideBelowPost: '% ausblenden', hideBelowTitle: 'Zeilen ausblenden, deren Anteil am Gesamtergebnis (erstes Wertefeld) unter dem angegebenen Prozentsatz liegt',
     pivotEmpty: 'Felder zu Zeilen / Spalten / Werte hinzufügen, um eine Pivot-Tabelle zu erstellen.',
     rowGroups: '{0} Zeilengruppen · {1} Spaltengruppen', grandTotal: 'Gesamtergebnis', total: 'Gesamt',
-    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}', stichtagRange: 'Stichtag',
+    kpiTitle: 'Kennzahlen – Anteil an der Spaltensumme', kpiTitleAbs: 'Kennzahlen – Absolutwerte', kpiOnline: 'Online-Anteil', kpiShareOf: 'Anteil {0}', stichtagRange: 'Stichtag',
     run: '▶ Ausführen (Strg/Cmd+Enter)', sqlHint: 'Geladene Tabellen sind über ihren Namen abfragbar.', runToSee: 'Führe eine Abfrage aus, um Ergebnisse zu sehen.',
     rowsN: '{0} Zeilen', moreRows: '…{0} weitere Zeilen werden nicht angezeigt',
     expSpreadsheet: 'Tabellenkalkulation', expData: 'Daten',
@@ -564,7 +564,7 @@ const I18N = {
     hideBelowPre: 'Hide <', hideBelowPost: '%', hideBelowTitle: 'Hide rows whose share of the grand total (first value field) is below the given percentage',
     pivotEmpty: 'Add fields to Rows / Columns / Values to build a pivot.',
     rowGroups: '{0} row groups · {1} column groups', grandTotal: 'Grand Total', total: 'Total',
-    kpiTitle: 'KPIs – share of column total', kpiOnline: 'Online share', kpiShareOf: '{0} share', stichtagRange: 'As-of date',
+    kpiTitle: 'KPIs – share of column total', kpiTitleAbs: 'KPIs – absolute values', kpiOnline: 'Online share', kpiShareOf: '{0} share', stichtagRange: 'As-of date',
     run: '▶ Run (Ctrl/Cmd+Enter)', sqlHint: 'Loaded tables are queryable by name.', runToSee: 'Run a query to see results.',
     rowsN: '{0} rows', moreRows: '…{0} more rows omitted from display',
     expSpreadsheet: 'Spreadsheet', expData: 'Data',
@@ -2788,19 +2788,28 @@ function buildPivotSheet(wb, opts = {}) {
     r++;
   }
 
-  // ── KPI rows (PKS only): same share % as on screen, fully expanded, netting pruned rows like above ──
+  // ── KPI rows (PKS only): fully expanded, netting pruned rows like above. Two blocks: shares of the
+  //    column total (%), then the underlying absolute values. ──
   const kpiData = opts.kpiData || (state.mode === 'pks' ? state.pksKpiData : null);
   if (kpiData && hasColDims) {
     const kpiRows = pksKpiRowDefs(kpiData, true), kpiLastCol = gtColStart + nValues - 1;
-    if (kpiRows.length) {
+    const writeKpiBlock = (title, mode) => {
+      if (!kpiRows.length) return;
       const banner = ws.getRow(r).getCell(1);
-      banner.value = tt('kpiTitle'); banner.fill = solid('FF8FAADC'); banner.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      banner.value = title; banner.fill = solid('FF8FAADC'); banner.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       banner.alignment = { vertical: 'middle' }; banner.border = allBorders();
       ws.mergeCells(r, 1, r, kpiLastCol); r++;
       const writeKpi = (cell, cKey, get) => {
         const m = pksKpiColMeasures(kpiData, cKey, prunedRoots);
-        const val = m && m.total ? get(m) / m.total : null;
-        if (val !== null && isFinite(val)) { cell.value = val; cell.numFmt = '0.0%'; }
+        if (m) {
+          if (mode === 'pct') {
+            const v = m.total ? get(m) / m.total : null;
+            if (v !== null && isFinite(v)) { cell.value = v; cell.numFmt = '0.0%'; }
+          } else {
+            const v = cellVal(get(m));
+            if (v !== null && v !== undefined && Number.isFinite(Number(v))) { cell.value = Number(v); cell.numFmt = numFmtCode(Number.isInteger(Number(v))); }
+          }
+        }
         cell.alignment = { horizontal: 'right' }; cell.border = allBorders(); cell.fill = solid('FFDCE6F3');
       };
       for (const kpi of kpiRows) {
@@ -2811,7 +2820,9 @@ function buildPivotSheet(wb, opts = {}) {
         writeKpi(row.getCell(gtColStart), '', kpi.get);
         r++;
       }
-    }
+    };
+    writeKpiBlock(tt('kpiTitle'), 'pct');
+    writeKpiBlock(tt('kpiTitleAbs'), 'abs');
   }
 
   // ── column outline levels (collapse detail columns into their subtotal) ──
